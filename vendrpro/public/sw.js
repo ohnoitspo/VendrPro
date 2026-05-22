@@ -1,5 +1,5 @@
 // Bump CACHE on every deployment — the changed byte triggers a new SW install
-const CACHE = 'vendrpro-20260522';
+const CACHE = 'vendrpro-20260522b';
 const SHELL = ['/', '/index.html', '/manifest.json'];
 
 self.addEventListener('install', e => {

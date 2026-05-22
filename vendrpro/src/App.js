@@ -87,7 +87,7 @@ export default function App() {
         {page === 'transaction' && <NewTransaction />}
         {page === 'inventory'   && <Inventory />}
         {page === 'eod'         && <EndOfDay />}
-        <BottomNav page={page} setPage={setPage} />
+        {page !== 'transaction' && <BottomNav page={page} setPage={setPage} />}
         {toast && <Toast {...toast} />}
       </div>
     </Ctx.Provider>

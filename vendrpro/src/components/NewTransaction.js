@@ -5,6 +5,7 @@ import { getSettings, updateSettings, addTransaction,
          markItemSold, markItemTraded, getAvailableInventory } from '../utils/storage';
 import { getEbayPrice } from '../utils/api';
 import CameraScanner from './CameraScanner';
+import BatchScanner from './BatchScanner';
 import { OfferScreen } from './ScrollWheel';
 import { ScrollWheel } from './ScrollWheel';
 
@@ -13,6 +14,7 @@ const GRADERS    = ['PSA','BGS','CGC','TAG'];
 const GRADES     = ['10','9.5','9','8.5','8','7','6','5','4','3','2','1'];
 const TX_TYPES   = [
   { id:'buy',        label:'📥 Buy',             desc:'Purchase cards from customer for cash' },
+  { id:'batch_buy',  label:'📦 Batch Buy',        desc:'Scan and price multiple cards at once — adds directly to inventory' },
   { id:'sale',       label:'💰 Cash Sale',        desc:'Sell from your inventory for cash' },
   { id:'trade_in',   label:'🔄 Trade + Cash In',  desc:'Sell your card, receive cards + cash top-up' },
   { id:'trade_even', label:'⚖️ Even Trade',        desc:'Swap cards of equal value, no cash' },
@@ -27,6 +29,7 @@ export default function NewTransaction() {
   const [txType,      setTxType]     = useState('buy');
   const [showCamera,  setShowCamera] = useState(false);
   const [showOffer,   setShowOffer]  = useState(false);
+  const [showBatch,   setShowBatch]  = useState(false);
 
   // Item being sold/traded away
   const [itemName,    setItemName]   = useState('');
@@ -155,6 +158,9 @@ export default function NewTransaction() {
     setPage('dashboard');
   };
 
+  // ── Batch scanner overlay ─────────────────────────────────────────
+  if (showBatch) return <BatchScanner onClose={() => setShowBatch(false)} />;
+
   // ── Type selection ────────────────────────────────────────────────
   if (step === 'type') return (
     <div className="page">
@@ -167,7 +173,10 @@ export default function NewTransaction() {
         <div style={{ display:'flex',flexDirection:'column',gap:10 }}>
           {TX_TYPES.map(t => (
             <button key={t.id} className="card"
-              onClick={() => { setTxType(t.id); setStep('form'); }}
+              onClick={() => {
+                if (t.id === 'batch_buy') { setShowBatch(true); return; }
+                setTxType(t.id); setStep('form');
+              }}
               style={{ textAlign:'left',border:'none',cursor:'pointer',
                 borderLeft:`3px solid ${txType===t.id?'var(--gold)':'transparent'}` }}>
               <p style={{ fontWeight:700,fontSize:'1.05rem',marginBottom:4 }}>{t.label}</p>
