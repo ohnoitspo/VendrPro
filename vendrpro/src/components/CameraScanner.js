@@ -1,13 +1,15 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { identifyCard, compressImage } from '../utils/api';
 
-export default function CameraScanner({ onResult, onClose }) {
+export default function CameraScanner({ onResult, onClose, itemType = 'single' }) {
   const videoRef   = useRef(null);
   const canvasRef  = useRef(null);
   const streamRef  = useRef(null);
   const [status,     setStatus]     = useState('starting');
   const [errMsg,     setErrMsg]     = useState('');
   const [scanResult, setScanResult] = useState(null);
+
+  const isSlab = itemType === 'slab';
 
   useEffect(() => {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -55,13 +57,9 @@ export default function CameraScanner({ onResult, onClose }) {
       const compressed = await compressImage(raw);
       const result     = await identifyCard(compressed);
       setScanResult(result);
-      if (!result.name) {
-        setStatus('failed');
-      } else if (result.confidence === 'low') {
-        setStatus('uncertain');
-      } else {
-        setStatus('identified');
-      }
+      if (!result.name)                    setStatus('failed');
+      else if (result.confidence === 'low') setStatus('uncertain');
+      else                                  setStatus('identified');
     } catch (err) {
       setScanResult({ error: err.message });
       setStatus('failed');
@@ -145,9 +143,11 @@ export default function CameraScanner({ onResult, onClose }) {
       ) : (
         /* ── Camera viewfinder ────────────────────────────────── */
         <>
+          {/* Vignette */}
           <div style={{ position: 'absolute', inset: 0,
             background: 'radial-gradient(ellipse 70% 50% at 50% 35%, transparent 40%, rgba(0,0,0,.65) 100%)' }} />
 
+          {/* Top bar */}
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0,
             padding: 'max(16px,env(safe-area-inset-top)) 16px 16px',
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -155,25 +155,42 @@ export default function CameraScanner({ onResult, onClose }) {
             <button onClick={() => { stopCam(); onClose(); }}
               style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1rem',
                 cursor: 'pointer', padding: 8 }}>✕ Cancel</button>
-            <p style={{ color: 'var(--gold)', fontWeight: 600 }}>Scan Card</p>
+            <p style={{ color: 'var(--gold)', fontWeight: 600 }}>
+              {isSlab ? 'Scan Slab Label' : 'Scan Card'}
+            </p>
             <div style={{ width: 60 }} />
           </div>
 
-          <div className="cam-guide">
-            <div className="cam-corner cam-tl" />
-            <div className="cam-corner cam-tr" />
-            <div className="cam-corner cam-bl" />
-            <div className="cam-corner cam-br" />
+          {/* Guide container — flex column, sits between top bar and capture area */}
+          <div style={{
+            position: 'absolute',
+            top: 'max(80px, calc(env(safe-area-inset-top) + 64px))',
+            bottom: 148,
+            left: 0, right: 0,
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            justifyContent: isSlab ? 'flex-start' : 'center',
+            paddingTop: isSlab ? 16 : 0,
+          }}>
+            {/* Card guide box */}
+            <div className="cam-guide">
+              <div className="cam-corner cam-tl" />
+              <div className="cam-corner cam-tr" />
+              <div className="cam-corner cam-bl" />
+              <div className="cam-corner cam-br" />
+            </div>
+
+            {/* Status text — naturally below guide */}
+            <div style={{ marginTop: 12, textAlign: 'center', padding: '0 32px' }}>
+              {status === 'starting'   && <p style={{ color: 'rgba(255,255,255,.7)', fontSize: '.85rem' }}>Starting camera...</p>}
+              {status === 'ready'      && <p style={{ color: 'rgba(255,255,255,.7)', fontSize: '.85rem' }}>
+                {isSlab ? 'Align the label text in the frame' : 'Centre the card in the frame'}
+              </p>}
+              {status === 'processing' && <p style={{ color: 'var(--gold)', fontSize: '.9rem', fontWeight: 600 }}>🔍 Identifying...</p>}
+              {status === 'error'      && <p style={{ color: 'var(--rose)', fontSize: '.85rem' }}>{errMsg}</p>}
+            </div>
           </div>
 
-          <div style={{ position: 'absolute', top: '52%', left: 0, right: 0,
-            textAlign: 'center', padding: '0 32px' }}>
-            {status === 'starting'   && <p style={{ color: 'rgba(255,255,255,.7)', fontSize: '.85rem' }}>Starting camera...</p>}
-            {status === 'ready'      && <p style={{ color: 'rgba(255,255,255,.7)', fontSize: '.85rem' }}>Centre the card in the frame</p>}
-            {status === 'processing' && <p style={{ color: 'var(--gold)', fontSize: '.9rem', fontWeight: 600 }}>🔍 Identifying...</p>}
-            {status === 'error'      && <p style={{ color: 'var(--rose)', fontSize: '.85rem' }}>{errMsg}</p>}
-          </div>
-
+          {/* Capture button */}
           <div style={{ position: 'absolute', bottom: 'max(48px,env(safe-area-inset-bottom))',
             left: 0, right: 0, display: 'flex', justifyContent: 'center' }}>
             {status === 'ready' && (
@@ -189,6 +206,7 @@ export default function CameraScanner({ onResult, onClose }) {
             )}
           </div>
 
+          {/* Error state — Enter Manually */}
           {status === 'error' && (
             <div style={{ position: 'absolute', bottom: 'max(32px,env(safe-area-inset-bottom))',
               left: 0, right: 0, textAlign: 'center', padding: '0 32px' }}>
@@ -199,6 +217,7 @@ export default function CameraScanner({ onResult, onClose }) {
             </div>
           )}
 
+          {/* Ready state — manual fallback link */}
           {status === 'ready' && (
             <div style={{ position: 'absolute', bottom: 'max(14px,env(safe-area-inset-bottom))',
               left: 0, right: 0, textAlign: 'center' }}>

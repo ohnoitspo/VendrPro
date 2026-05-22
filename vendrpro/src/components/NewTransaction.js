@@ -222,7 +222,7 @@ export default function NewTransaction() {
 
   return (
     <div className="page">
-      {showCamera && <CameraScanner onResult={handleScan} onClose={() => setShowCamera(false)} />}
+      {showCamera && <CameraScanner onResult={handleScan} onClose={() => setShowCamera(false)} itemType={itemType} />}
       {showOffer  && (
         <OfferScreen itemName={itemName} refPrice={ref||null} cashPct={cashPct} tradePct={tradePct}
           onAcceptCash={() => { setShowOffer(false); showToast('Cash offer accepted', 'success'); }}
