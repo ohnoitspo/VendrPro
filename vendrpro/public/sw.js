@@ -1,4 +1,5 @@
-const CACHE = 'vendrpro-v1';
+// Bump CACHE on every deployment — the changed byte triggers a new SW install
+const CACHE = 'vendrpro-20260522';
 const SHELL = ['/', '/index.html', '/manifest.json'];
 
 self.addEventListener('install', e => {
@@ -27,7 +28,7 @@ self.addEventListener('fetch', e => {
     );
     return;
   }
-  // App shell — cache first
+  // App shell — cache first, fall back to network, store new responses
   e.respondWith(
     caches.match(e.request).then(cached =>
       cached || fetch(e.request).then(res => {

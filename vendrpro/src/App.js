@@ -21,12 +21,15 @@ export default function App() {
   const [pinUnlocked, setPinUnlocked] = useState(false);
 
   useEffect(() => {
-    // Load active session
     const s = getSession();
     if (s?.active) setSession(s);
-
-    // Pre-warm Vercel functions
     if (navigator.onLine) pingFunctions();
+
+    if (localStorage.getItem('app_updated')) {
+      localStorage.removeItem('app_updated');
+      setToast({ msg: '✓ App updated', type: 'success' });
+      setTimeout(() => setToast(null), 3000);
+    }
   }, []);
 
   useEffect(() => {
