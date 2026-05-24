@@ -10,8 +10,8 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build",
-    "vercel-build": "react-scripts build"
+    "build": "node scripts/stamp-sw.js && react-scripts build",
+    "vercel-build": "node scripts/stamp-sw.js && react-scripts build"
   },
   "browserslist": {
     "production": [

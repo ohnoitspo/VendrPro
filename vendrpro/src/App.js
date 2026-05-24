@@ -34,7 +34,7 @@ export default function App() {
     const onControllerChange = () => {
       if (!hadController || refreshing) return;
       refreshing = true;
-      setToast({ msg: '🆕 App updated — refreshing...', type: 'success' });
+      setToast({ msg: 'Updating to latest version...', type: 'success' });
       setTimeout(() => window.location.reload(), 2000);
     };
     navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
