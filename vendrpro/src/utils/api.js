@@ -15,7 +15,10 @@ export const identifyCard = async (base64Image) => {
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ image: base64Image }),
   });
-  if (!res.ok) throw new Error('Vision API error');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Vision API error ${res.status}`);
+  }
   const data = await res.json();
   return parseVision(data.responses?.[0] || {});
 };
@@ -89,7 +92,7 @@ export const getEbayPrice = async (name, set = '', grade = '') => {
 
 // ── Image compression before sending to Vision ────────────────────────
 export const compressImage = (base64, maxWidthPx = 1200, quality = 0.7) => {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
@@ -103,6 +106,10 @@ export const compressImage = (base64, maxWidthPx = 1200, quality = 0.7) => {
       canvas.getContext('2d').drawImage(img, 0, 0, width, height);
       resolve(canvas.toDataURL('image/jpeg', quality).split(',')[1]);
     };
-    img.src = `data:image/jpeg;base64,${base64}`;
+    img.onerror = () => reject(new Error('Failed to decode image for compression'));
+    const mime = base64.startsWith('/9j/') ? 'image/jpeg'
+               : base64.startsWith('iVBOR') ? 'image/png'
+               : 'image/jpeg';
+    img.src = `data:${mime};base64,${base64}`;
   });
 };

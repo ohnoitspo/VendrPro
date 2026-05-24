@@ -22,7 +22,11 @@ export default async function handler(req, res) {
   }
 
   const apiKey = process.env.VISION_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'Vision API not configured' });
+  if (!apiKey) {
+    console.error('[vision] VISION_API_KEY env var is not set');
+    return res.status(500).json({ error: 'Vision API not configured' });
+  }
+  console.log('[vision] image length:', image.length, 'apiKey present:', !!apiKey);
 
   try {
     const response = await fetch(
@@ -42,9 +46,14 @@ export default async function handler(req, res) {
       }
     );
     const data = await response.json();
-    if (!response.ok) return res.status(response.status).json({ error: data.error?.message || 'Vision error' });
+    if (!response.ok) {
+      console.error('[vision] Google error:', response.status, JSON.stringify(data));
+      return res.status(response.status).json({ error: data.error?.message || 'Vision error', details: data.error });
+    }
+    console.log('[vision] success, responses:', data.responses?.length);
     return res.status(200).json(data);
   } catch (err) {
+    console.error('[vision] fetch threw:', err.message);
     return res.status(500).json({ error: err.message });
   }
 }
