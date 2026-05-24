@@ -45,7 +45,7 @@ export default function Dashboard() {
 
       <div className="page-body">
         <button className="btn btn-primary btn-full"
-          onClick={() => setPage('transaction')}
+          onClick={() => setPage('transaction-type')}
           style={{ minHeight:68,fontSize:'1.1rem',marginBottom:20 }}>
           ➕ New Transaction
         </button>

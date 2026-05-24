@@ -28,7 +28,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!('serviceWorker' in navigator)) return;
+    if (!('serviceWorker' in navigator) || process.env.NODE_ENV !== 'production') return;
     const hadController = !!navigator.serviceWorker.controller;
     let refreshing = false;
     const onControllerChange = () => {
@@ -60,7 +60,7 @@ export default function App() {
   };
 
   const ctx = { session, setSession, settings, setSettings,
-                showToast, refreshSession, isOnline, setPage };
+                showToast, refreshSession, isOnline, setPage, page };
 
   // PIN gate
   if (hasPin() && !pinUnlocked) {
@@ -92,10 +92,10 @@ export default function App() {
             📵 Offline — transactions save locally · scanning unavailable
           </div>
         )}
-        {page === 'dashboard'   && <Dashboard />}
-        {page === 'transaction' && <NewTransaction />}
-        {page === 'inventory'   && <Inventory />}
-        {page === 'eod'         && <EndOfDay />}
+        {page === 'dashboard'                                    && <Dashboard />}
+        {(page === 'transaction-type' || page === 'transaction') && <NewTransaction />}
+        {page === 'inventory'                                    && <Inventory />}
+        {page === 'eod'                                          && <EndOfDay />}
         {page !== 'transaction' && <BottomNav page={page} setPage={setPage} version={APP_VERSION} />}
         {toast && <Toast {...toast} />}
       </div>

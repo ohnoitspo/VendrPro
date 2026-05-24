@@ -1,4 +1,4 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useRef, useContext } from 'react';
 import { Ctx } from '../App';
 import { getSettings, updateSettings, addTransaction,
          updateSessionCash, addInventoryItem,
@@ -8,6 +8,7 @@ import CameraScanner from './CameraScanner';
 import BatchScanner from './BatchScanner';
 import { OfferScreen } from './ScrollWheel';
 import { ScrollWheel } from './ScrollWheel';
+import BottomNav from './UI';
 
 const CONDITIONS = ['Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged','New/Sealed','Graded'];
 const GRADERS    = ['PSA','BGS','CGC','TAG'];
@@ -22,7 +23,7 @@ const TX_TYPES   = [
 ];
 
 export default function NewTransaction() {
-  const { showToast, isOnline, setPage } = useContext(Ctx);
+  const { showToast, isOnline, setPage, page } = useContext(Ctx);
   const s = getSettings();
 
   const [step,        setStep]       = useState('type');
@@ -59,6 +60,32 @@ export default function NewTransaction() {
   // Selected inventory item (for sales/trades)
   const [selInvItem,  setSelInvItem] = useState(null);
   const [showInvPick, setShowInvPick]= useState(false);
+
+  // Swipe-up peek nav (form step only)
+  const [navPeek,    setNavPeek]    = useState(false);
+  const peekTimer    = useRef(null);
+  const touchStartY  = useRef(null);
+
+  const showNavPeek = () => {
+    setNavPeek(true);
+    if (peekTimer.current) clearTimeout(peekTimer.current);
+    peekTimer.current = setTimeout(() => setNavPeek(false), 4000);
+  };
+  const handleTouchStart = (e) => {
+    const t = e.touches[0];
+    touchStartY.current = window.innerHeight - t.clientY < 80 ? t.clientY : null;
+  };
+  const handleTouchEnd = (e) => {
+    if (touchStartY.current === null) return;
+    if (touchStartY.current - e.changedTouches[0].clientY > 50) showNavPeek();
+    touchStartY.current = null;
+  };
+  const peekSetPage = (p) => {
+    setNavPeek(false);
+    if (peekTimer.current) clearTimeout(peekTimer.current);
+    if (p === 'transaction-type') setStep('type');
+    setPage(p);
+  };
 
   const ref  = parseFloat(refPrice)   || 0;
   const cash = parseFloat(cashIn)     || 0;
@@ -165,8 +192,8 @@ export default function NewTransaction() {
   if (step === 'type') return (
     <div className="page">
       <div className="page-header">
+        <button className="btn btn-ghost btn-sm" onClick={() => setPage('dashboard')}>← Back</button>
         <h2>New Transaction</h2>
-        <button className="btn btn-ghost btn-sm" onClick={() => setPage('dashboard')}>Cancel</button>
       </div>
       <div className="page-body">
         <p className="section-label">Transaction type</p>
@@ -175,7 +202,7 @@ export default function NewTransaction() {
             <button key={t.id} className="card"
               onClick={() => {
                 if (t.id === 'batch_buy') { setShowBatch(true); return; }
-                setTxType(t.id); setStep('form');
+                setTxType(t.id); setStep('form'); setPage('transaction');
               }}
               style={{ textAlign:'left',border:'none',cursor:'pointer',
                 borderLeft:`3px solid ${txType===t.id?'var(--gold)':'transparent'}` }}>
@@ -230,7 +257,7 @@ export default function NewTransaction() {
   const txLabel = TX_TYPES.find(t => t.id === txType)?.label || '';
 
   return (
-    <div className="page">
+    <div className="page" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       {showCamera && <CameraScanner onResult={handleScan} onClose={() => setShowCamera(false)} itemType={itemType} />}
       {showOffer  && (
         <OfferScreen itemName={itemName} refPrice={ref||null} cashPct={cashPct} tradePct={tradePct}
@@ -244,7 +271,7 @@ export default function NewTransaction() {
           <p style={{ color:'var(--grey)',fontSize:'.75rem',textTransform:'uppercase' }}>{txLabel}</p>
           <h2>Transaction Details</h2>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={() => setPage('dashboard')}>Cancel</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => { setStep('type'); setPage('transaction-type'); }}>← Back</button>
       </div>
 
       <div className="page-body">
@@ -509,11 +536,17 @@ export default function NewTransaction() {
           style={{ minHeight:60,fontSize:'1.1rem',marginBottom:10 }}>
           ✅ Complete Transaction
         </button>
-        <button className="btn btn-ghost btn-full" onClick={() => setPage('dashboard')}>
-          Cancel
-        </button>
         <div style={{ height:8 }} />
       </div>
+
+      {/* Swipe-up handle indicator */}
+      <div style={{ position:'fixed',bottom:0,left:0,right:0,height:20,display:'flex',
+        justifyContent:'center',alignItems:'center',pointerEvents:'none',zIndex:50 }}>
+        <div style={{ width:36,height:4,borderRadius:2,background:'rgba(255,255,255,0.18)' }} />
+      </div>
+
+      {/* Peek nav — revealed by swipe up near bottom edge */}
+      {navPeek && <BottomNav page={page} setPage={peekSetPage} />}
     </div>
   );
 }
