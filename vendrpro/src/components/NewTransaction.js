@@ -8,7 +8,7 @@ import CameraScanner from './CameraScanner';
 import BatchScanner from './BatchScanner';
 import { OfferScreen } from './ScrollWheel';
 import { ScrollWheel } from './ScrollWheel';
-import BottomNav from './UI';
+import { BottomNav } from './UI';
 
 const CONDITIONS = ['Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged','New/Sealed','Graded'];
 const GRADERS    = ['PSA','BGS','CGC','TAG'];
@@ -61,6 +61,8 @@ export default function NewTransaction() {
   const [selInvItem,  setSelInvItem] = useState(null);
   const [showInvPick, setShowInvPick]= useState(false);
 
+  const [showOfferCalc, setShowOfferCalc] = useState(false);
+
   // Swipe-up peek nav (form step only)
   const [navPeek,    setNavPeek]    = useState(false);
   const peekTimer    = useRef(null);
@@ -94,14 +96,41 @@ export default function NewTransaction() {
   const sale = parseFloat(saleValue)  || 0;
   const cost = parseFloat(costBasis)  || selInvItem?.costBasis || 0;
 
-  const isSelling = ['sale','trade_in','trade_even','trade_out'].includes(txType);
-  const revenue   = txType === 'buy'        ? 0
-                  : txType === 'sale'       ? sale
-                  : txType === 'trade_in'   ? sale + cash
-                  : txType === 'trade_even' ? sale
-                  : sale; // trade_out
+  const revenue  = txType === 'buy'        ? 0
+                 : txType === 'sale'       ? sale
+                 : txType === 'trade_in'   ? sale + cash
+                 : txType === 'trade_even' ? sale
+                 : sale; // trade_out
   const netCash  = cash - paid;
   const profit   = revenue - cost;
+
+  const showInvSelector = ['sale','trade_in','trade_even'].includes(txType);
+  const showCardsRcvd   = txType !== 'sale';
+  const showWheels      = txType !== 'sale';
+
+  const netPos = tval + cash - sale;
+  const summaryRows =
+    txType === 'buy' ? [
+      ['Offer / Cost',  `A$${cost.toFixed(2)}`, 'var(--white)'],
+      ['Cash Paid Out', `A$${paid.toFixed(2)}`, 'var(--white)'],
+    ] : txType === 'sale' ? [
+      ['Sale Price', `A$${sale.toFixed(2)}`,  'var(--white)'],
+      ['Cost Basis', `A$${cost.toFixed(2)}`,  'var(--white)'],
+      ['Profit',     `${profit>=0?'+':'-'}A$${Math.abs(profit).toFixed(2)}`, profit>=0?'var(--gold)':'var(--rose)'],
+    ] : txType === 'trade_in' ? [
+      ['Your Card Value', `A$${sale.toFixed(2)}`, 'var(--white)'],
+      ['Trade Value In',  `A$${tval.toFixed(2)}`, 'var(--white)'],
+      ['Cash Top-up',     `A$${cash.toFixed(2)}`, 'var(--white)'],
+      ['Net Position',    `${netPos>=0?'+':'-'}A$${Math.abs(netPos).toFixed(2)}`, netPos>=0?'var(--emerald)':'var(--rose)'],
+    ] : txType === 'trade_even' ? [
+      ['Your Card Value', `A$${sale.toFixed(2)}`, 'var(--white)'],
+      ['Trade Value In',  `A$${tval.toFixed(2)}`, 'var(--white)'],
+      ['Difference',      `${(tval-sale)>=0?'+':'-'}A$${Math.abs(tval-sale).toFixed(2)}`, (tval-sale)>=0?'var(--emerald)':'var(--rose)'],
+    ] : [
+      ['Trade Value In', `A$${tval.toFixed(2)}`, 'var(--white)'],
+      ['Cash Paid Out',  `A$${paid.toFixed(2)}`, 'var(--white)'],
+      ['Net Received',   `${(tval-paid)>=0?'+':'-'}A$${Math.abs(tval-paid).toFixed(2)}`, (tval-paid)>=0?'var(--emerald)':'var(--rose)'],
+    ];
 
   // ── Camera ────────────────────────────────────────────────────────
   const handleScan = async (result) => {
@@ -202,7 +231,7 @@ export default function NewTransaction() {
             <button key={t.id} className="card"
               onClick={() => {
                 if (t.id === 'batch_buy') { setShowBatch(true); return; }
-                setTxType(t.id); setStep('form'); setPage('transaction');
+                setTxType(t.id); setStep('form'); setPage('transaction'); setShowOfferCalc(false);
               }}
               style={{ textAlign:'left',border:'none',cursor:'pointer',
                 borderLeft:`3px solid ${txType===t.id?'var(--gold)':'transparent'}` }}>
@@ -259,7 +288,7 @@ export default function NewTransaction() {
   return (
     <div className="page" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       {showCamera && <CameraScanner onResult={handleScan} onClose={() => setShowCamera(false)} itemType={itemType} />}
-      {showOffer  && (
+      {showOffer && (
         <OfferScreen itemName={itemName} refPrice={ref||null} cashPct={cashPct} tradePct={tradePct}
           onAcceptCash={() => { setShowOffer(false); showToast('Cash offer accepted', 'success'); }}
           onAcceptTrade={() => { setShowOffer(false); showToast('Trade offer accepted', 'success'); }}
@@ -276,20 +305,20 @@ export default function NewTransaction() {
 
       <div className="page-body">
 
-        {/* Item section */}
+        {/* ── Item ── */}
         <div className="card" style={{ marginBottom:14 }}>
           <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12 }}>
             <p className="section-label" style={{ margin:0 }}>
-              {txType==='buy' ? 'Card Being Bought' : 'Item Being Sold / Traded'}
+              {txType === 'buy'       ? 'Card Being Bought'
+             : txType === 'trade_out' ? 'Item Traded Away (Optional)'
+             : 'Item Being Sold / Traded'}
             </p>
             <div style={{ display:'flex',gap:8 }}>
-              {isSelling && (
-                <button className="btn btn-secondary btn-sm"
-                  onClick={() => setShowInvPick(true)}>📋 Inventory</button>
+              {showInvSelector && (
+                <button className="btn btn-secondary btn-sm" onClick={() => setShowInvPick(true)}>📋 Inventory</button>
               )}
               {isOnline && (
-                <button className="btn btn-secondary btn-sm"
-                  onClick={() => setShowCamera(true)}>📷 Scan</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setShowCamera(true)}>📷 Scan</button>
               )}
             </div>
           </div>
@@ -313,16 +342,14 @@ export default function NewTransaction() {
           )}
 
           <div className="field" style={{ marginBottom:10 }}>
-            <label>Card / Product Name</label>
-            <input value={itemName} onChange={e => setItemName(e.target.value)}
-              placeholder="e.g. Charizard ex" />
+            <label>{txType === 'trade_out' ? 'Card / Product Name (optional)' : 'Card / Product Name'}</label>
+            <input value={itemName} onChange={e => setItemName(e.target.value)} placeholder="e.g. Charizard ex" />
           </div>
 
           <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10 }}>
             <div className="field" style={{ margin:0 }}>
               <label>Set</label>
-              <input value={itemSet} onChange={e => setItemSet(e.target.value)}
-                placeholder="e.g. Scarlet & Violet" />
+              <input value={itemSet} onChange={e => setItemSet(e.target.value)} placeholder="e.g. Scarlet & Violet" />
             </div>
             <div className="field" style={{ margin:0 }}>
               <label>Category</label>
@@ -355,7 +382,7 @@ export default function NewTransaction() {
             </div>
           )}
 
-          {itemType === 'single' && (
+          {itemType === 'single' && txType !== 'trade_out' && (
             <div className="field" style={{ marginTop:10,marginBottom:0 }}>
               <label>Condition</label>
               <select value={itemCond} onChange={e => setItemCond(e.target.value)}>
@@ -365,17 +392,16 @@ export default function NewTransaction() {
           )}
 
           {isOnline && (
-            <button className="btn btn-secondary btn-full"
-              onClick={lookupEbay} disabled={loading||!itemName}
+            <button className="btn btn-secondary btn-full" onClick={lookupEbay} disabled={loading||!itemName}
               style={{ marginTop:12,fontSize:'.85rem',minHeight:42 }}>
               {loading ? '🔍 Searching eBay AU...' : '🔍 Look up eBay AU price'}
             </button>
           )}
         </div>
 
-        {/* Reference price + offer wheels */}
+        {/* ── Reference price + offer wheels ── */}
         <div className="card" style={{ marginBottom:14 }}>
-          <div className="field" style={{ marginBottom:14 }}>
+          <div className="field" style={{ marginBottom: showWheels ? 14 : 0 }}>
             <label>Reference Price (A$)</label>
             <input type="number" inputMode="decimal" value={refPrice}
               onChange={e => setRefPrice(e.target.value)}
@@ -383,91 +409,138 @@ export default function NewTransaction() {
               style={{ fontSize:'1.2rem',fontWeight:700,textAlign:'center' }} />
           </div>
 
-          <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:16 }}>
-            <ScrollWheel label="Cash %" value={cashPct} onChange={setCashPct} />
-            <ScrollWheel label="Trade %" value={tradePct} onChange={setTradePct} />
-          </div>
-
-          {ref > 0 && (
-            <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:14 }}>
-              <div style={{ background:'rgba(245,166,35,.1)',borderRadius:'var(--radius-sm)',
-                padding:12,textAlign:'center',border:'1px solid rgba(245,166,35,.3)' }}>
-                <p style={{ color:'var(--grey)',fontSize:'.7rem',marginBottom:4 }}>CASH OFFER</p>
-                <p style={{ color:'var(--gold)',fontSize:'1.5rem',fontWeight:700 }}>
-                  A${(ref*cashPct/100).toFixed(2)}
-                </p>
-              </div>
-              <div style={{ background:'rgba(0,178,202,.1)',borderRadius:'var(--radius-sm)',
-                padding:12,textAlign:'center',border:'1px solid rgba(0,178,202,.3)' }}>
-                <p style={{ color:'var(--grey)',fontSize:'.7rem',marginBottom:4 }}>TRADE OFFER</p>
-                <p style={{ color:'var(--teal)',fontSize:'1.5rem',fontWeight:700 }}>
-                  A${(ref*tradePct/100).toFixed(2)}
-                </p>
-              </div>
-            </div>
+          {showWheels && (
+            txType === 'buy' && !showOfferCalc ? (
+              <button className="btn btn-secondary btn-full" onClick={() => setShowOfferCalc(true)}
+                style={{ fontSize:'.85rem' }}>
+                % Calculate offer from market value
+              </button>
+            ) : (
+              <>
+                <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:16 }}>
+                  <ScrollWheel label="Cash %" value={cashPct} onChange={setCashPct} />
+                  <ScrollWheel label="Trade %" value={tradePct} onChange={setTradePct} />
+                </div>
+                {ref > 0 && (
+                  <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:14 }}>
+                    <div style={{ background:'rgba(245,166,35,.1)',borderRadius:'var(--radius-sm)',
+                      padding:12,textAlign:'center',border:'1px solid rgba(245,166,35,.3)' }}>
+                      <p style={{ color:'var(--grey)',fontSize:'.7rem',marginBottom:4 }}>CASH OFFER</p>
+                      <p style={{ color:'var(--gold)',fontSize:'1.5rem',fontWeight:700 }}>
+                        A${(ref*cashPct/100).toFixed(2)}
+                      </p>
+                    </div>
+                    <div style={{ background:'rgba(0,178,202,.1)',borderRadius:'var(--radius-sm)',
+                      padding:12,textAlign:'center',border:'1px solid rgba(0,178,202,.3)' }}>
+                      <p style={{ color:'var(--grey)',fontSize:'.7rem',marginBottom:4 }}>TRADE OFFER</p>
+                      <p style={{ color:'var(--teal)',fontSize:'1.5rem',fontWeight:700 }}>
+                        A${(ref*tradePct/100).toFixed(2)}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                <button className="btn btn-secondary btn-full" onClick={() => setShowOffer(true)}
+                  style={{ marginTop:12,fontSize:'.88rem' }}>
+                  👤 Show Offer to Customer
+                </button>
+              </>
+            )
           )}
-
-          <button className="btn btn-secondary btn-full"
-            onClick={() => setShowOffer(true)}
-            style={{ marginTop:12,fontSize:'.88rem' }}>
-            👤 Show Offer to Customer
-          </button>
         </div>
 
-        {/* Payment */}
+        {/* ── Payment ── */}
         <div className="card" style={{ marginBottom:14 }}>
           <p className="section-label" style={{ marginBottom:12 }}>Payment</p>
 
-          {isSelling && (
-            <div className="field">
-              <label>
-                {txType==='sale' ? 'Sale Price (A$)' : 'Market Value of Your Card (A$)'}
-              </label>
-              <input type="number" inputMode="decimal" value={saleValue}
-                onChange={e => setSaleValue(e.target.value)} placeholder="0.00"
-                style={{ fontSize:'1.1rem',textAlign:'center' }} />
-            </div>
-          )}
-
-          {txType === 'buy' && (
-            <div className="field">
+          {txType === 'buy' && <>
+            <div className="field" style={{ marginBottom:0 }}>
               <label>Offer / Cost (A$)</label>
               <input type="number" inputMode="decimal" value={costBasis}
                 onChange={e => setCostBasis(e.target.value)} placeholder="What you're paying"
                 style={{ fontSize:'1.1rem',textAlign:'center' }} />
             </div>
-          )}
-
-          <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10 }}>
-            <div className="field" style={{ margin:0 }}>
-              <label>Cash Received (A$)</label>
-              <input type="number" inputMode="decimal" value={cashIn}
-                onChange={e => setCashIn(e.target.value)} placeholder="0.00" />
-            </div>
-            <div className="field" style={{ margin:0 }}>
+            <div className="field" style={{ marginBottom:0,marginTop:10 }}>
               <label>Cash Paid Out (A$)</label>
               <input type="number" inputMode="decimal" value={cashOut}
-                onChange={e => setCashOut(e.target.value)} placeholder="0.00" />
+                onChange={e => setCashOut(e.target.value)} placeholder="0.00"
+                style={{ fontSize:'1.1rem',textAlign:'center' }} />
             </div>
-          </div>
+          </>}
 
-          {txType !== 'sale' && (
+          {txType === 'sale' && <>
+            <div className="field" style={{ marginBottom:0 }}>
+              <label>Sale Price (A$)</label>
+              <input type="number" inputMode="decimal" value={saleValue}
+                onChange={e => setSaleValue(e.target.value)} placeholder="0.00"
+                style={{ fontSize:'1.1rem',textAlign:'center' }} />
+            </div>
+            <div className="field" style={{ marginBottom:0,marginTop:10 }}>
+              <label>Cash Received (A$)</label>
+              <input type="number" inputMode="decimal" value={cashIn}
+                onChange={e => setCashIn(e.target.value)} placeholder="0.00"
+                style={{ fontSize:'1.1rem',textAlign:'center' }} />
+            </div>
+          </>}
+
+          {txType === 'trade_in' && <>
+            <div className="field" style={{ marginBottom:0 }}>
+              <label>Market Value of Your Card (A$)</label>
+              <input type="number" inputMode="decimal" value={saleValue}
+                onChange={e => setSaleValue(e.target.value)} placeholder="0.00"
+                style={{ fontSize:'1.1rem',textAlign:'center' }} />
+            </div>
+            <div className="field" style={{ marginBottom:0,marginTop:10 }}>
+              <label>Cash Received — Top-up (A$)</label>
+              <input type="number" inputMode="decimal" value={cashIn}
+                onChange={e => setCashIn(e.target.value)} placeholder="0.00"
+                style={{ fontSize:'1.1rem',textAlign:'center' }} />
+            </div>
             <div className="field" style={{ marginBottom:0,marginTop:10 }}>
               <label>Total Trade Value Received (A$)</label>
               <input type="number" inputMode="decimal" value={tradeValIn}
-                onChange={e => setTradeValIn(e.target.value)} placeholder="0.00" />
+                onChange={e => setTradeValIn(e.target.value)} placeholder="0.00"
+                style={{ fontSize:'1.1rem',textAlign:'center' }} />
             </div>
-          )}
+          </>}
+
+          {txType === 'trade_even' && <>
+            <div className="field" style={{ marginBottom:0 }}>
+              <label>Market Value of Your Card (A$)</label>
+              <input type="number" inputMode="decimal" value={saleValue}
+                onChange={e => setSaleValue(e.target.value)} placeholder="0.00"
+                style={{ fontSize:'1.1rem',textAlign:'center' }} />
+            </div>
+            <div className="field" style={{ marginBottom:0,marginTop:10 }}>
+              <label>Total Trade Value Received (A$)</label>
+              <input type="number" inputMode="decimal" value={tradeValIn}
+                onChange={e => setTradeValIn(e.target.value)} placeholder="0.00"
+                style={{ fontSize:'1.1rem',textAlign:'center' }} />
+            </div>
+          </>}
+
+          {txType === 'trade_out' && <>
+            <div className="field" style={{ marginBottom:0 }}>
+              <label>Cash Paid Out (A$)</label>
+              <input type="number" inputMode="decimal" value={cashOut}
+                onChange={e => setCashOut(e.target.value)} placeholder="0.00"
+                style={{ fontSize:'1.1rem',textAlign:'center' }} />
+            </div>
+            <div className="field" style={{ marginBottom:0,marginTop:10 }}>
+              <label>Total Trade Value Received (A$)</label>
+              <input type="number" inputMode="decimal" value={tradeValIn}
+                onChange={e => setTradeValIn(e.target.value)} placeholder="0.00"
+                style={{ fontSize:'1.1rem',textAlign:'center' }} />
+            </div>
+          </>}
         </div>
 
-        {/* Trade-in cards */}
-        {txType !== 'sale' && (
+        {/* ── Cards Received ── */}
+        {showCardsRcvd && (
           <div className="card" style={{ marginBottom:14 }}>
             <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12 }}>
               <p className="section-label" style={{ margin:0 }}>Cards Received</p>
               <button className="btn btn-secondary btn-sm" onClick={addTradeIn}>+ Add Card</button>
             </div>
-
             {tradeIns.length === 0 ? (
               <p style={{ color:'var(--grey)',fontSize:'.82rem',textAlign:'center',padding:'10px 0' }}>
                 Tap + Add Card for each card received
@@ -509,22 +582,17 @@ export default function NewTransaction() {
           </div>
         )}
 
-        {/* Notes */}
+        {/* ── Notes ── */}
         <div className="field" style={{ marginBottom:14 }}>
           <label>Notes (optional)</label>
           <input value={notes} onChange={e => setNotes(e.target.value)}
             placeholder="Any notes about this transaction" />
         </div>
 
-        {/* Summary */}
+        {/* ── Summary ── */}
         <div className="card" style={{ marginBottom:16 }}>
           <p className="section-label" style={{ marginBottom:10 }}>Summary</p>
-          {[
-            ['Revenue',      `A$${revenue.toFixed(2)}`,   'var(--white)'],
-            ['Cost / Offered',`A$${cost.toFixed(2)}`,     'var(--white)'],
-            ['Net Cash',     `${netCash>=0?'+':'-'}A$${Math.abs(netCash).toFixed(2)}`, netCash>=0?'var(--emerald)':'var(--rose)'],
-            ['Est. Profit',  `${profit>=0?'+':'-'}A$${Math.abs(profit).toFixed(2)}`,  profit>=0?'var(--gold)':'var(--rose)'],
-          ].map(([label,value,color]) => (
+          {summaryRows.map(([label,value,color]) => (
             <div key={label} style={{ display:'flex',justifyContent:'space-between',marginBottom:8 }}>
               <p style={{ color:'var(--grey)',fontSize:'.9rem' }}>{label}</p>
               <p style={{ color,fontWeight:700,fontSize:'.9rem' }}>{value}</p>
