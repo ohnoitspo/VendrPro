@@ -27,6 +27,7 @@ const DEFAULT_SETTINGS = {
   tradePct:      85,
   lastCondition: 'Near Mint',
   lastCategory:  'single',
+  theme:         'dark',
 };
 export const getSettings    = ()       => ls.get(K.SETTINGS, DEFAULT_SETTINGS);
 export const updateSettings = (patch)  => { const s = { ...getSettings(), ...patch }; ls.set(K.SETTINGS, s); return s; };
@@ -34,7 +35,7 @@ export const updateSettings = (patch)  => { const s = { ...getSettings(), ...pat
 // ── Session ───────────────────────────────────────────────────────────
 export const getSession = () => ls.get(K.SESSION, null);
 
-export const startSession = (startingFloat) => {
+export const startSession = (startingFloat, { showName = '', showDate = '', showLocation = '' } = {}) => {
   const s = {
     id:            Date.now().toString(),
     startedAt:     new Date().toISOString(),
@@ -42,6 +43,9 @@ export const startSession = (startingFloat) => {
     cashIn:        0,
     cashOut:       0,
     active:        true,
+    showName,
+    showDate,
+    showLocation,
   };
   ls.set(K.SESSION, s);
   return s;
@@ -135,17 +139,34 @@ export const getEODSummary = () => {
 
 // ── CSV Export ────────────────────────────────────────────────────────
 export const exportCSV = () => {
-  const { transactions, soldItems, tradedItems, acquiredUnsold, inventory } = getEODSummary();
-  const date = new Date().toLocaleDateString('en-AU').replace(/\//g, '-');
+  const { session, transactions, soldItems, tradedItems, acquiredUnsold, inventory } = getEODSummary();
+  const fallbackDate = new Date().toLocaleDateString('en-AU').replace(/\//g, '-');
 
+  const showName     = session?.showName     || '';
+  const showDate     = session?.showDate     || fallbackDate;
+  const showLocation = session?.showLocation || '';
+  const showFloat    = (session?.startingFloat || 0).toFixed(2);
+
+  const slug = (s) => s.replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  const namePart = slug(showName) || 'Show';
+  const datePart = slug(showDate) || fallbackDate;
+
+  const q     = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const toCSV = (headers, rows) =>
-    [headers, ...rows].map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    [headers, ...rows].map(r => r.map(c => q(c)).join(',')).join('\n');
 
-  // Transactions
-  const txCSV = toCSV(
+  const preamble = [
+    `${q('Show Name')},${q(showName)}`,
+    `${q('Date')},${q(showDate)}`,
+    `${q('Location')},${q(showLocation)}`,
+    `${q('Starting Float')},${q('A$' + showFloat)}`,
+    '',
+  ].join('\n');
+
+  const txBody = toCSV(
     ['Date','Time','Type','Item','Cost Basis (A$)','Revenue (A$)','Cash In (A$)','Cash Out (A$)','Trade Value In (A$)','Net Cash (A$)','Gross Profit (A$)','Notes'],
     transactions.map(tx => [
-      date,
+      showDate,
       new Date(tx.createdAt).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }),
       tx.type, tx.itemName || '',
       tx.costOfGoods || 0, tx.revenue || 0,
@@ -156,7 +177,8 @@ export const exportCSV = () => {
     ])
   );
 
-  // Collectr update
+  const txCSV = preamble + txBody;
+
   const rows = [];
   soldItems.filter(i => i.source === 'imported').forEach(i =>
     rows.push(['🔴 REMOVE', i.name, i.grade || i.condition, i.costBasis || 0, i.salePrice || '', 'Sold']));
@@ -172,7 +194,12 @@ export const exportCSV = () => {
     rows
   );
 
-  return { txCSV, collectrCSV, date };
+  return {
+    txCSV,
+    collectrCSV,
+    txFilename:       `${namePart}_${datePart}_transactions.csv`,
+    collectrFilename: `${namePart}_${datePart}_collectr.csv`,
+  };
 };
 
 export const downloadCSV = (content, filename) => {

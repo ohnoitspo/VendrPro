@@ -37,9 +37,14 @@ export default function Dashboard() {
             Started {showTime} · {isOnline ? '🟢 Online' : '🔴 Offline'}
           </p>
         </div>
-        <div style={{ textAlign:'right' }}>
-          <p style={{ color:'var(--grey)',fontSize:'.7rem' }}>FLOAT</p>
-          <p style={{ color:'var(--gold)',fontSize:'1.5rem',fontWeight:700 }}>{fmt(stats.float)}</p>
+        <div style={{ display:'flex',alignItems:'center',gap:10 }}>
+          <div style={{ textAlign:'right' }}>
+            <p style={{ color:'var(--grey)',fontSize:'.7rem' }}>FLOAT</p>
+            <p style={{ color:'var(--gold)',fontSize:'1.5rem',fontWeight:700 }}>{fmt(stats.float)}</p>
+          </div>
+          <button onClick={() => setPage('settings')}
+            style={{ background:'none',border:'none',color:'var(--grey)',
+              fontSize:'1.3rem',cursor:'pointer',padding:'4px',lineHeight:1 }}>⚙️</button>
         </div>
       </div>
 

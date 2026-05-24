@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { getSession, getSettings, hasPin } from './utils/storage';
+import { getSession, getSettings, updateSettings, hasPin } from './utils/storage';
 import { pingFunctions } from './utils/api';
 import StartShow    from './components/StartShow';
 import Dashboard    from './components/Dashboard';
 import NewTransaction from './components/NewTransaction';
 import Inventory    from './components/Inventory';
 import EndOfDay     from './components/EndOfDay';
+import Settings     from './components/Settings';
 import BottomNav    from './components/BottomNav';
 import Toast        from './components/Toast';
 import PinScreen    from './components/PinScreen';
@@ -20,6 +21,13 @@ export default function App() {
   const [toast,     setToast]    = useState(null);
   const [isOnline,  setIsOnline] = useState(navigator.onLine);
   const [pinUnlocked, setPinUnlocked] = useState(false);
+  const [theme,     setTheme]    = useState(() => getSettings().theme || 'dark');
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('light', theme === 'light');
+  }, [theme]);
+
+  const applyTheme = (t) => { setTheme(t); updateSettings({ theme: t }); };
 
   useEffect(() => {
     const s = getSession();
@@ -60,7 +68,7 @@ export default function App() {
   };
 
   const ctx = { session, setSession, settings, setSettings,
-                showToast, refreshSession, isOnline, setPage, page };
+                showToast, refreshSession, isOnline, setPage, page, theme, applyTheme };
 
   // PIN gate
   if (hasPin() && !pinUnlocked) {
@@ -96,6 +104,7 @@ export default function App() {
         {(page === 'transaction-type' || page === 'transaction') && <NewTransaction />}
         {page === 'inventory'                                    && <Inventory />}
         {page === 'eod'                                          && <EndOfDay />}
+        {page === 'settings'                                     && <Settings />}
         {page !== 'transaction' && <BottomNav page={page} setPage={setPage} version={APP_VERSION} />}
         {toast && <Toast {...toast} />}
       </div>

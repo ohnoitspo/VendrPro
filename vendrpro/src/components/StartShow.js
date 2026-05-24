@@ -4,9 +4,12 @@ import { startSession, importFromCollectr, parseCollectrCSV } from '../utils/sto
 
 export default function StartShow() {
   const { setSession, showToast } = useContext(Ctx);
-  const [float,    setFloat]   = useState('');
-  const [imported, setImported]= useState(null);
-  const [loading,  setLoading] = useState(false);
+  const [float,    setFloat]    = useState('');
+  const [showName, setShowName] = useState('');
+  const [showDate, setShowDate] = useState(new Date().toISOString().split('T')[0]);
+  const [location, setLocation] = useState('');
+  const [imported, setImported] = useState(null);
+  const [loading,  setLoading]  = useState(false);
   const fileRef = useRef(null);
 
   const handleCSV = (e) => {
@@ -31,7 +34,7 @@ export default function StartShow() {
   const handleStart = () => {
     if (!float || isNaN(parseFloat(float))) { showToast('Enter your starting float', 'error'); return; }
     setLoading(true);
-    const session = startSession(parseFloat(float));
+    const session = startSession(parseFloat(float), { showName, showDate, showLocation: location });
     if (imported?.items?.length) importFromCollectr(imported.items);
     setSession(session);
   };
@@ -58,6 +61,25 @@ export default function StartShow() {
             value={float} onChange={e => setFloat(e.target.value)}
             style={{ fontSize:'1.4rem',textAlign:'center',fontWeight:700 }} />
         </div>
+
+        {/* Show details */}
+        <div className="field">
+          <label>Show Name (optional)</label>
+          <input value={showName} onChange={e => setShowName(e.target.value)}
+            placeholder="e.g. PokeMarket Sydney" />
+        </div>
+        <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10 }}>
+          <div className="field" style={{ margin:0 }}>
+            <label>Date</label>
+            <input type="date" value={showDate} onChange={e => setShowDate(e.target.value)} />
+          </div>
+          <div className="field" style={{ margin:0 }}>
+            <label>Location (optional)</label>
+            <input value={location} onChange={e => setLocation(e.target.value)}
+              placeholder="e.g. ICC Sydney" />
+          </div>
+        </div>
+        <div style={{ height:14 }} />
 
         {/* Collectr import */}
         <div className="card" style={{ marginBottom:16 }}>

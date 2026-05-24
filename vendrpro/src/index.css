@@ -13,6 +13,12 @@
   --radius-sm:8px;--radius-md:12px;--radius-lg:16px;--radius-xl:24px;
   --shadow:0 4px 24px rgba(0,0,0,.4);
 }
+html.light{
+  --navy:#F1F5F9;--navy-card:#FFFFFF;--navy-light:#E2E8F0;
+  --white:#1E293B;--grey:#64748B;--charcoal:#1E293B;
+  --shadow:0 4px 24px rgba(0,0,0,.1);
+}
+html.light .btn-primary{color:#1A1F36}
 html,body,#root{height:100%;width:100%;overflow:hidden}
 body{
   font-family:'Calibri','Segoe UI',system-ui,-apple-system,sans-serif;

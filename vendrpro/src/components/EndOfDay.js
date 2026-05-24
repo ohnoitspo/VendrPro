@@ -12,9 +12,9 @@ export default function EndOfDay() {
   const handleExport = () => {
     setExporting(true);
     try {
-      const { txCSV, collectrCSV, date } = exportCSV();
-      downloadCSV(txCSV,       `vendrpro_transactions_${date}.csv`);
-      setTimeout(() => downloadCSV(collectrCSV, `vendrpro_collectr_update_${date}.csv`), 600);
+      const { txCSV, collectrCSV, txFilename, collectrFilename } = exportCSV();
+      downloadCSV(txCSV, txFilename);
+      setTimeout(() => downloadCSV(collectrCSV, collectrFilename), 600);
     } catch (e) { console.error(e); }
     setExporting(false);
   };
