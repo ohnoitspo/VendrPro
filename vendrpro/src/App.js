@@ -11,6 +11,7 @@ import Toast        from './components/Toast';
 import PinScreen    from './components/PinScreen';
 
 export const Ctx = React.createContext(null);
+export const APP_VERSION = '1.0.1';
 
 export default function App() {
   const [page,      setPage]     = useState('dashboard');
@@ -24,12 +25,20 @@ export default function App() {
     const s = getSession();
     if (s?.active) setSession(s);
     if (navigator.onLine) pingFunctions();
+  }, []);
 
-    if (localStorage.getItem('app_updated')) {
-      localStorage.removeItem('app_updated');
-      setToast({ msg: '✓ App updated', type: 'success' });
-      setTimeout(() => setToast(null), 3000);
-    }
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const hadController = !!navigator.serviceWorker.controller;
+    let refreshing = false;
+    const onControllerChange = () => {
+      if (!hadController || refreshing) return;
+      refreshing = true;
+      setToast({ msg: '🆕 App updated — refreshing...', type: 'success' });
+      setTimeout(() => window.location.reload(), 2000);
+    };
+    navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+    return () => navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
   }, []);
 
   useEffect(() => {
@@ -87,7 +96,7 @@ export default function App() {
         {page === 'transaction' && <NewTransaction />}
         {page === 'inventory'   && <Inventory />}
         {page === 'eod'         && <EndOfDay />}
-        {page !== 'transaction' && <BottomNav page={page} setPage={setPage} />}
+        {page !== 'transaction' && <BottomNav page={page} setPage={setPage} version={APP_VERSION} />}
         {toast && <Toast {...toast} />}
       </div>
     </Ctx.Provider>

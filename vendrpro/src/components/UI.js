@@ -8,7 +8,7 @@ export function Toast({ msg, type }) {
 export default Toast;
 
 // ── Bottom Nav ────────────────────────────────────────────────────────
-export function BottomNav({ page, setPage }) {
+export function BottomNav({ page, setPage, version }) {
   const items = [
     { id: 'dashboard',   label: 'Home',  icon: 'M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z' },
     { id: 'transaction', label: 'Deal',  icon: 'M12 5v14M5 12h14' },
@@ -16,7 +16,7 @@ export function BottomNav({ page, setPage }) {
     { id: 'eod',         label: 'EOD',   icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z' },
   ];
   return (
-    <nav className="bottom-nav">
+    <nav className="bottom-nav" style={{ position: 'relative' }}>
       {items.map(({ id, label, icon }) => (
         <button key={id} className={`nav-btn${page === id ? ' active' : ''}`} onClick={() => setPage(id)}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -25,6 +25,15 @@ export function BottomNav({ page, setPage }) {
           {label}
         </button>
       ))}
+      {version && (
+        <span style={{
+          position: 'absolute', bottom: 3, right: 6,
+          fontSize: '0.6rem', opacity: 0.3, pointerEvents: 'none',
+          color: 'inherit', letterSpacing: '0.02em',
+        }}>
+          v{version}
+        </span>
+      )}
     </nav>
   );
 }
