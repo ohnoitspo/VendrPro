@@ -23,7 +23,7 @@ export default function EndOfDay() {
 
   const { session, soldItems, tradedItems, acquiredUnsold,
           totalRevenue, totalCost, grossProfit, cashIn, cashOut,
-          currentFloat, txCount } = summary;
+          currentFloat, txCount, paymentBreakdown } = summary;
 
   return (
     <div className="page">
@@ -72,6 +72,22 @@ export default function EndOfDay() {
             </p>
           </div>
         </div>
+
+        {/* Revenue by payment method */}
+        {Object.keys(paymentBreakdown).length > 0 && (
+          <>
+            <p className="section-label">Revenue by Payment Method</p>
+            <div className="card" style={{ marginBottom:16 }}>
+              {Object.entries(paymentBreakdown).map(([method, amount]) => (
+                <div key={method} style={{ display:'flex',justifyContent:'space-between',
+                  padding:'9px 0',borderBottom:'1px solid var(--navy-light)' }}>
+                  <p style={{ color:'var(--grey)',fontSize:'.9rem' }}>{method}</p>
+                  <p style={{ color:'var(--white)',fontWeight:700 }}>{fmt(amount)}</p>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
 
         {/* Acquired today unsold */}
         {acquiredUnsold.length > 0 && (

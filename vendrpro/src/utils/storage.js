@@ -126,10 +126,16 @@ export const getEODSummary = () => {
   const totalRevenue = transactions.reduce((s, tx) => s + (tx.revenue || 0), 0);
   const totalCost    = transactions.reduce((s, tx) => s + (tx.costOfGoods || 0), 0);
   const grossProfit  = totalRevenue - totalCost;
+  const paymentBreakdown = {};
+  transactions.filter(tx => (tx.revenue || 0) > 0).forEach(tx => {
+    const m = tx.paymentMethod || 'Cash';
+    paymentBreakdown[m] = (paymentBreakdown[m] || 0) + (tx.revenue || 0);
+  });
   return {
     session, transactions, inventory,
     soldItems, tradedItems, acquiredUnsold,
     totalRevenue, totalCost, grossProfit,
+    paymentBreakdown,
     cashIn:       session?.cashIn  || 0,
     cashOut:      session?.cashOut || 0,
     currentFloat: getCurrentFloat(),
@@ -163,19 +169,28 @@ export const exportCSV = () => {
     '',
   ].join('\n');
 
-  const txBody = toCSV(
-    ['Date','Time','Type','Item','Cost Basis (A$)','Revenue (A$)','Cash In (A$)','Cash Out (A$)','Trade Value In (A$)','Net Cash (A$)','Gross Profit (A$)','Notes'],
-    transactions.map(tx => [
+  const txHeaders = ['Date','Time','Type','Item','Payment Method','Cost Basis (A$)','Revenue (A$)','Cash In (A$)','Cash Out (A$)','Trade Value In (A$)','Net Cash (A$)','Gross Profit (A$)','Notes'];
+  const txRows = [];
+  transactions.forEach(tx => {
+    txRows.push([
       showDate,
       new Date(tx.createdAt).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' }),
       tx.type, tx.itemName || '',
+      tx.paymentMethod || 'Cash',
       tx.costOfGoods || 0, tx.revenue || 0,
       tx.cashReceived || 0, tx.cashPaid || 0, tx.tradeValueIn || 0,
       (tx.cashReceived || 0) - (tx.cashPaid || 0),
       (tx.revenue || 0) - (tx.costOfGoods || 0),
       tx.notes || '',
-    ])
-  );
+    ]);
+    if (tx.bundleItems?.length) {
+      tx.bundleItems.forEach(bi => txRows.push([
+        '', '', '', `  ↳ ${bi.name}`, '', bi.costBasis || 0,
+        '', '', '', '', '', '', '',
+      ]));
+    }
+  });
+  const txBody = toCSV(txHeaders, txRows);
 
   const txCSV = preamble + txBody;
 

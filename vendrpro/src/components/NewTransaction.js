@@ -10,10 +10,11 @@ import { OfferScreen } from './ScrollWheel';
 import { ScrollWheel } from './ScrollWheel';
 import { BottomNav } from './UI';
 
-const CONDITIONS = ['Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged','New/Sealed','Graded'];
-const GRADERS    = ['PSA','BGS','CGC','TAG'];
-const GRADES     = ['10','9.5','9','8.5','8','7','6','5','4','3','2','1'];
-const TX_TYPES   = [
+const CONDITIONS    = ['Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged','New/Sealed','Graded'];
+const GRADERS       = ['PSA','BGS','CGC','TAG'];
+const GRADES        = ['10','9.5','9','8.5','8','7','6','5','4','3','2','1'];
+const PAY_METHODS   = ['Cash','Card (Square)','Bank Transfer','PayID'];
+const TX_TYPES      = [
   { id:'buy',        label:'📥 Buy',             desc:'Purchase cards from customer for cash' },
   { id:'batch_buy',  label:'📦 Batch Buy',        desc:'Scan and price multiple cards at once — adds directly to inventory' },
   { id:'sale',       label:'💰 Cash Sale',        desc:'Sell from your inventory for cash' },
@@ -32,7 +33,7 @@ export default function NewTransaction() {
   const [showOffer,   setShowOffer]  = useState(false);
   const [showBatch,   setShowBatch]  = useState(false);
 
-  // Item being sold/traded away
+  // Item
   const [itemName,    setItemName]   = useState('');
   const [itemSet,     setItemSet]    = useState('');
   const [itemGrade,   setItemGrade]  = useState('');
@@ -41,29 +42,41 @@ export default function NewTransaction() {
   const [costBasis,   setCostBasis]  = useState('');
   const [saleValue,   setSaleValue]  = useState('');
 
-  // Price reference + offer %
+  // eBay / offer
   const [refPrice,    setRefPrice]   = useState('');
   const [cashPct,     setCashPct]    = useState(s.cashPct  || 80);
   const [tradePct,    setTradePct]   = useState(s.tradePct || 85);
   const [ebayData,    setEbayData]   = useState(null);
 
-  // Payment
+  // Payment amounts
   const [cashIn,      setCashIn]     = useState('');
   const [cashOut,     setCashOut]    = useState('');
   const [tradeValIn,  setTradeValIn] = useState('');
 
-  // Trade-in cards received
+  // Trade-in cards
   const [tradeIns,    setTradeIns]   = useState([]);
   const [notes,       setNotes]      = useState('');
   const [loading,     setLoading]    = useState(false);
 
-  // Selected inventory item (for sales/trades)
+  // Inventory selection
   const [selInvItem,  setSelInvItem] = useState(null);
   const [showInvPick, setShowInvPick]= useState(false);
 
   const [showOfferCalc, setShowOfferCalc] = useState(false);
 
-  // Swipe-up peek nav (form step only)
+  // Payment method
+  const [payMethod,    setPayMethod]    = useState('Cash');
+  const [splitMethod1, setSplitMethod1] = useState('Cash');
+  const [splitMethod2, setSplitMethod2] = useState('Card (Square)');
+  const [splitAmount1, setSplitAmount1] = useState('');
+  const [squareLaunched, setSquareLaunched] = useState(false);
+
+  // Bundle
+  const [bundleMode,  setBundleMode]  = useState(false);
+  const [bundleItems, setBundleItems] = useState([]);
+  const [bundleName,  setBundleName]  = useState('');
+
+  // Swipe-up peek nav
   const [navPeek,    setNavPeek]    = useState(false);
   const peekTimer    = useRef(null);
   const touchStartY  = useRef(null);
@@ -89,19 +102,27 @@ export default function NewTransaction() {
     setPage(p);
   };
 
+  // ── Computed values ───────────────────────────────────────────────────
   const ref  = parseFloat(refPrice)   || 0;
   const cash = parseFloat(cashIn)     || 0;
   const paid = parseFloat(cashOut)    || 0;
   const tval = parseFloat(tradeValIn) || 0;
   const sale = parseFloat(saleValue)  || 0;
-  const cost = parseFloat(costBasis)  || selInvItem?.costBasis || 0;
+
+  const bundleCost = bundleItems.reduce((s, i) => s + (i.costBasis || 0), 0);
+  const cost       = bundleMode ? bundleCost : (parseFloat(costBasis) || selInvItem?.costBasis || 0);
+
+  const squareAmount = txType === 'sale'      ? sale
+                     : txType === 'buy'       ? paid
+                     : txType === 'trade_in'  ? cash
+                     : txType === 'trade_out' ? paid
+                     : 0;
 
   const revenue  = txType === 'buy'        ? 0
                  : txType === 'sale'       ? sale
                  : txType === 'trade_in'   ? sale + cash
                  : txType === 'trade_even' ? sale
-                 : sale; // trade_out
-  const netCash  = cash - paid;
+                 : sale;
   const profit   = revenue - cost;
 
   const showInvSelector = ['sale','trade_in','trade_even'].includes(txType);
@@ -132,14 +153,13 @@ export default function NewTransaction() {
       ['Net Received',   `${(tval-paid)>=0?'+':'-'}A$${Math.abs(tval-paid).toFixed(2)}`, (tval-paid)>=0?'var(--emerald)':'var(--rose)'],
     ];
 
-  // ── Camera ────────────────────────────────────────────────────────
+  // ── Camera ─────────────────────────────────────────────────────────────
   const handleScan = async (result) => {
     setShowCamera(false);
     if (result.name)    setItemName(result.name);
     if (result.setName) setItemSet(result.setName);
     if (result.grade)   { setItemGrade(result.grade); setItemType('slab'); }
     else if (result.itemType) setItemType(result.itemType);
-
     if (isOnline && result.name && !result.manual) {
       setLoading(true);
       const data = await getEbayPrice(result.name, result.setName, result.grade);
@@ -148,7 +168,7 @@ export default function NewTransaction() {
     }
   };
 
-  // ── eBay lookup ───────────────────────────────────────────────────
+  // ── eBay lookup ────────────────────────────────────────────────────────
   const lookupEbay = async () => {
     if (!itemName || !isOnline) return;
     setLoading(true);
@@ -165,29 +185,66 @@ export default function NewTransaction() {
     setLoading(false);
   };
 
-  // ── Trade-in management ───────────────────────────────────────────
+  // ── Trade-in management ────────────────────────────────────────────────
   const addTradeIn = () => setTradeIns(p => [...p, {
     id: `ti_${Date.now()}`, name:'', condition:'Near Mint', grade:'', marketValue:'', offerValue:'',
   }]);
   const updateTI = (id, k, v) => setTradeIns(p => p.map(t => t.id===id ? {...t,[k]:v} : t));
   const removeTI = (id)       => setTradeIns(p => p.filter(t => t.id!==id));
 
-  // ── Complete ──────────────────────────────────────────────────────
+  // ── Bundle management ──────────────────────────────────────────────────
+  const addToBundle    = (item) => { if (!bundleItems.find(i => i.id === item.id)) setBundleItems(p => [...p, item]); };
+  const removeFromBundle = (id) => setBundleItems(p => p.filter(i => i.id !== id));
+
+  // ── Square deep link ───────────────────────────────────────────────────
+  const openSquare = () => {
+    const amtCents = Math.round(squareAmount * 100);
+    const payload  = JSON.stringify({
+      amount_money: { amount: amtCents, currency_code: 'AUD' },
+      callback_url: 'vendrpro://payment-complete',
+      version: '1.1',
+    });
+    window.location.href = `square-commerce-v1://payment/create?data=${btoa(payload)}`;
+    setSquareLaunched(true);
+  };
+
+  // ── Complete ───────────────────────────────────────────────────────────
   const complete = () => {
-    if (!itemName.trim() && txType !== 'buy') { showToast('Enter item name', 'error'); return; }
+    const effName = bundleMode
+      ? (bundleName.trim() || `Bundle x${bundleItems.length} cards`)
+      : itemName.trim();
+
+    if (!effName && txType !== 'buy') { showToast('Enter item name', 'error'); return; }
     if (txType === 'buy' && tradeIns.length === 0 && !itemName) { showToast('Add at least one card received', 'error'); return; }
+    if (bundleMode && bundleItems.length === 0) { showToast('Add at least one card to the bundle', 'error'); return; }
+
+    let finalPayMethod = payMethod;
+    if (payMethod === 'Split') {
+      const s1 = parseFloat(splitAmount1) || 0;
+      const s2 = Math.max(0, squareAmount - s1);
+      if (squareAmount > 0 && s1 > squareAmount) { showToast('Split amount exceeds total', 'error'); return; }
+      finalPayMethod = `Split: ${splitMethod1} A$${s1.toFixed(2)} + ${splitMethod2} A$${s2.toFixed(2)}`;
+    }
 
     const tx = {
-      type: txType, itemName: itemName.trim(), itemSet, itemGrade, itemType,
-      costOfGoods: cost, revenue, cashReceived: cash, cashPaid: paid,
-      tradeValueIn: tval, salePrice: sale, refPrice: ref, cashPct, tradePct, notes, tradeIns,
+      type: txType,
+      itemName: effName,
+      itemSet:  bundleMode ? '' : itemSet,
+      itemGrade: bundleMode ? '' : itemGrade,
+      itemType:  bundleMode ? 'bundle' : itemType,
+      costOfGoods: cost, revenue,
+      cashReceived: cash, cashPaid: paid,
+      tradeValueIn: tval, salePrice: sale,
+      refPrice: ref, cashPct, tradePct, notes, tradeIns,
+      paymentMethod: finalPayMethod,
+      bundleItems: bundleMode
+        ? bundleItems.map(i => ({ id: i.id, name: i.name, costBasis: i.costBasis || 0 }))
+        : undefined,
     };
     const saved = addTransaction(tx);
 
-    // Float update
     if (cash > 0 || paid > 0) updateSessionCash(cash, paid);
 
-    // Add trade-ins to inventory
     tradeIns.forEach(ti => {
       if (ti.name) addInventoryItem({
         name: ti.name, condition: ti.grade || ti.condition,
@@ -197,14 +254,17 @@ export default function NewTransaction() {
       });
     });
 
-    // For pure buy, add main item if entered
     if (txType === 'buy' && itemName) {
       addInventoryItem({ name:itemName, set:itemSet, grade:itemGrade,
         condition:itemCond, costBasis:cost, itemType });
     }
 
-    // Mark inventory item as sold/traded
-    if (selInvItem) {
+    if (bundleMode) {
+      bundleItems.forEach(item => {
+        if (txType === 'sale' || txType === 'trade_in') markItemSold(item.id, saved.id, null);
+        else markItemTraded(item.id, saved.id);
+      });
+    } else if (selInvItem) {
       if (txType === 'sale' || txType === 'trade_in') markItemSold(selInvItem.id, saved.id, sale);
       else markItemTraded(selInvItem.id, saved.id);
     }
@@ -214,10 +274,10 @@ export default function NewTransaction() {
     setPage('dashboard');
   };
 
-  // ── Batch scanner overlay ─────────────────────────────────────────
+  // ── Batch scanner overlay ──────────────────────────────────────────────
   if (showBatch) return <BatchScanner onClose={() => setShowBatch(false)} />;
 
-  // ── Type selection ────────────────────────────────────────────────
+  // ── Type selection ─────────────────────────────────────────────────────
   if (step === 'type') return (
     <div className="page">
       <div className="page-header">
@@ -232,6 +292,8 @@ export default function NewTransaction() {
               onClick={() => {
                 if (t.id === 'batch_buy') { setShowBatch(true); return; }
                 setTxType(t.id); setStep('form'); setPage('transaction'); setShowOfferCalc(false);
+                setBundleMode(false); setBundleItems([]); setBundleName('');
+                setPayMethod('Cash'); setSplitAmount1(''); setSquareLaunched(false);
               }}
               style={{ textAlign:'left',border:'none',cursor:'pointer',
                 borderLeft:`3px solid ${txType===t.id?'var(--gold)':'transparent'}` }}>
@@ -244,9 +306,53 @@ export default function NewTransaction() {
     </div>
   );
 
-  // ── Inventory picker ──────────────────────────────────────────────
+  // ── Inventory picker ───────────────────────────────────────────────────
   if (showInvPick) {
     const inv = getAvailableInventory();
+    if (bundleMode) {
+      return (
+        <div className="page">
+          <div className="page-header">
+            <h2>Add to Bundle</h2>
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowInvPick(false)}>
+              Done {bundleItems.length > 0 ? `(${bundleItems.length})` : ''}
+            </button>
+          </div>
+          <div className="page-body">
+            {inv.length === 0 ? (
+              <p style={{ color:'var(--grey)',textAlign:'center',padding:'40px 0' }}>No available inventory</p>
+            ) : (
+              <div className="card" style={{ padding:0 }}>
+                {inv.map(item => {
+                  const selected = !!bundleItems.find(i => i.id === item.id);
+                  return (
+                    <button key={item.id} onClick={() => selected ? removeFromBundle(item.id) : addToBundle(item)}
+                      style={{ display:'flex',alignItems:'center',gap:12,padding:'12px 16px',
+                        width:'100%',background:selected?'rgba(245,166,35,.08)':'none',border:'none',
+                        borderBottom:'1px solid var(--navy-light)',cursor:'pointer',textAlign:'left' }}>
+                      <div style={{ width:22,height:22,borderRadius:'50%',flexShrink:0,
+                        background:selected?'var(--gold)':'transparent',
+                        border:`2px solid ${selected?'var(--gold)':'var(--grey)'}`,
+                        display:'flex',alignItems:'center',justifyContent:'center',
+                        fontSize:'.75rem',color:'var(--navy)',fontWeight:700 }}>
+                        {selected && '✓'}
+                      </div>
+                      <div>
+                        <p style={{ color:'var(--white)',fontWeight:600 }}>{item.name}</p>
+                        <p style={{ color:'var(--grey)',fontSize:'.78rem' }}>
+                          {item.grade||item.condition} · Cost: A${(item.costBasis||0).toFixed(2)}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="page">
         <div className="page-header">
@@ -282,7 +388,7 @@ export default function NewTransaction() {
     );
   }
 
-  // ── Main form ─────────────────────────────────────────────────────
+  // ── Main form ──────────────────────────────────────────────────────────
   const txLabel = TX_TYPES.find(t => t.id === txType)?.label || '';
 
   return (
@@ -314,88 +420,136 @@ export default function NewTransaction() {
              : 'Item Being Sold / Traded'}
             </p>
             <div style={{ display:'flex',gap:8 }}>
-              {showInvSelector && (
+              {showInvSelector && !bundleMode && (
                 <button className="btn btn-secondary btn-sm" onClick={() => setShowInvPick(true)}>📋 Inventory</button>
               )}
-              {isOnline && (
+              {isOnline && !bundleMode && (
                 <button className="btn btn-secondary btn-sm" onClick={() => setShowCamera(true)}>📷 Scan</button>
               )}
             </div>
           </div>
 
-          {ebayData && (
-            <div style={{ background:'rgba(5,150,105,.1)',border:'1px solid var(--emerald)',
-              borderRadius:'var(--radius-sm)',padding:'8px 12px',marginBottom:12,
-              fontSize:'.8rem',color:'#34D399' }}>
-              ✅ eBay AU: A${parseFloat(refPrice).toFixed(2)} median · {ebayData.count} listings
+          {/* Bundle / Single toggle */}
+          {showInvSelector && (
+            <div style={{ display:'flex',gap:8,marginBottom:12 }}>
+              <button className={`btn btn-sm${!bundleMode?' btn-primary':' btn-secondary'}`} style={{ flex:1 }}
+                onClick={() => { setBundleMode(false); setBundleItems([]); setBundleName(''); }}>
+                Single Item
+              </button>
+              <button className={`btn btn-sm${bundleMode?' btn-primary':' btn-secondary'}`} style={{ flex:1 }}
+                onClick={() => { setBundleMode(true); setSelInvItem(null); setCostBasis(''); }}>
+                📦 Bundle
+              </button>
             </div>
           )}
 
-          {selInvItem && (
-            <div style={{ background:'rgba(245,166,35,.1)',border:'1px solid var(--gold)',
-              borderRadius:'var(--radius-sm)',padding:'8px 12px',marginBottom:12,
-              fontSize:'.8rem',color:'var(--gold)',display:'flex',justifyContent:'space-between' }}>
-              <span>📋 From inventory · cost A${(selInvItem.costBasis||0).toFixed(2)}</span>
-              <button onClick={() => { setSelInvItem(null); setCostBasis(''); }}
-                style={{ background:'none',border:'none',color:'var(--grey)',cursor:'pointer' }}>✕</button>
-            </div>
-          )}
-
-          <div className="field" style={{ marginBottom:10 }}>
-            <label>{txType === 'trade_out' ? 'Card / Product Name (optional)' : 'Card / Product Name'}</label>
-            <input value={itemName} onChange={e => setItemName(e.target.value)} placeholder="e.g. Charizard ex" />
-          </div>
-
-          <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10 }}>
-            <div className="field" style={{ margin:0 }}>
-              <label>Set</label>
-              <input value={itemSet} onChange={e => setItemSet(e.target.value)} placeholder="e.g. Scarlet & Violet" />
-            </div>
-            <div className="field" style={{ margin:0 }}>
-              <label>Category</label>
-              <select value={itemType} onChange={e => setItemType(e.target.value)}>
-                <option value="single">Single</option>
-                <option value="slab">Slab</option>
-                <option value="sealed">Sealed</option>
-              </select>
-            </div>
-          </div>
-
-          {itemType === 'slab' && (
-            <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:10 }}>
-              <div className="field" style={{ margin:0 }}>
-                <label>Grader</label>
-                <select value={itemGrade.split(' ')[0]||''}
-                  onChange={e => setItemGrade(`${e.target.value} ${itemGrade.split(' ')[1]||''}`.trim())}>
-                  <option value="">Select</option>
-                  {GRADERS.map(g => <option key={g}>{g}</option>)}
-                </select>
+          {/* Bundle UI */}
+          {bundleMode ? (
+            <>
+              <div className="field" style={{ marginBottom:10 }}>
+                <label>Bundle Name</label>
+                <input value={bundleName} onChange={e => setBundleName(e.target.value)}
+                  placeholder={`Bundle x${bundleItems.length || 0} cards`} />
               </div>
-              <div className="field" style={{ margin:0 }}>
-                <label>Grade</label>
-                <select value={itemGrade.split(' ')[1]||''}
-                  onChange={e => setItemGrade(`${itemGrade.split(' ')[0]||''} ${e.target.value}`.trim())}>
-                  <option value="">Select</option>
-                  {GRADES.map(g => <option key={g}>{g}</option>)}
-                </select>
+              {bundleItems.length === 0 ? (
+                <p style={{ color:'var(--grey)',fontSize:'.82rem',textAlign:'center',padding:'8px 0' }}>
+                  Tap + Add Cards to select inventory items
+                </p>
+              ) : (
+                <div style={{ marginBottom:10 }}>
+                  {bundleItems.map(item => (
+                    <div key={item.id} style={{ display:'flex',justifyContent:'space-between',
+                      alignItems:'center',padding:'7px 0',borderBottom:'1px solid var(--navy-light)' }}>
+                      <div>
+                        <p style={{ fontSize:'.9rem',fontWeight:600 }}>{item.name}</p>
+                        <p style={{ color:'var(--grey)',fontSize:'.75rem' }}>Cost: A${(item.costBasis||0).toFixed(2)}</p>
+                      </div>
+                      <button onClick={() => removeFromBundle(item.id)}
+                        style={{ background:'none',border:'none',color:'var(--rose)',cursor:'pointer',padding:'4px 8px' }}>✕</button>
+                    </div>
+                  ))}
+                  <div style={{ display:'flex',justifyContent:'space-between',paddingTop:8 }}>
+                    <p style={{ color:'var(--grey)',fontSize:'.82rem' }}>Combined Cost Basis</p>
+                    <p style={{ color:'var(--gold)',fontWeight:700,fontSize:'.9rem' }}>A${bundleCost.toFixed(2)}</p>
+                  </div>
+                </div>
+              )}
+              <button className="btn btn-secondary btn-full" onClick={() => setShowInvPick(true)}
+                style={{ fontSize:'.85rem',minHeight:42 }}>
+                + Add Cards from Inventory
+              </button>
+            </>
+          ) : (
+            <>
+              {ebayData && (
+                <div style={{ background:'rgba(5,150,105,.1)',border:'1px solid var(--emerald)',
+                  borderRadius:'var(--radius-sm)',padding:'8px 12px',marginBottom:12,
+                  fontSize:'.8rem',color:'#34D399' }}>
+                  ✅ eBay AU: A${parseFloat(refPrice).toFixed(2)} median · {ebayData.count} listings
+                </div>
+              )}
+              {selInvItem && (
+                <div style={{ background:'rgba(245,166,35,.1)',border:'1px solid var(--gold)',
+                  borderRadius:'var(--radius-sm)',padding:'8px 12px',marginBottom:12,
+                  fontSize:'.8rem',color:'var(--gold)',display:'flex',justifyContent:'space-between' }}>
+                  <span>📋 From inventory · cost A${(selInvItem.costBasis||0).toFixed(2)}</span>
+                  <button onClick={() => { setSelInvItem(null); setCostBasis(''); }}
+                    style={{ background:'none',border:'none',color:'var(--grey)',cursor:'pointer' }}>✕</button>
+                </div>
+              )}
+              <div className="field" style={{ marginBottom:10 }}>
+                <label>{txType === 'trade_out' ? 'Card / Product Name (optional)' : 'Card / Product Name'}</label>
+                <input value={itemName} onChange={e => setItemName(e.target.value)} placeholder="e.g. Charizard ex" />
               </div>
-            </div>
-          )}
-
-          {itemType === 'single' && txType !== 'trade_out' && (
-            <div className="field" style={{ marginTop:10,marginBottom:0 }}>
-              <label>Condition</label>
-              <select value={itemCond} onChange={e => setItemCond(e.target.value)}>
-                {CONDITIONS.map(c => <option key={c}>{c}</option>)}
-              </select>
-            </div>
-          )}
-
-          {isOnline && (
-            <button className="btn btn-secondary btn-full" onClick={lookupEbay} disabled={loading||!itemName}
-              style={{ marginTop:12,fontSize:'.85rem',minHeight:42 }}>
-              {loading ? '🔍 Searching eBay AU...' : '🔍 Look up eBay AU price'}
-            </button>
+              <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10 }}>
+                <div className="field" style={{ margin:0 }}>
+                  <label>Set</label>
+                  <input value={itemSet} onChange={e => setItemSet(e.target.value)} placeholder="e.g. Scarlet & Violet" />
+                </div>
+                <div className="field" style={{ margin:0 }}>
+                  <label>Category</label>
+                  <select value={itemType} onChange={e => setItemType(e.target.value)}>
+                    <option value="single">Single</option>
+                    <option value="slab">Slab</option>
+                    <option value="sealed">Sealed</option>
+                  </select>
+                </div>
+              </div>
+              {itemType === 'slab' && (
+                <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:10 }}>
+                  <div className="field" style={{ margin:0 }}>
+                    <label>Grader</label>
+                    <select value={itemGrade.split(' ')[0]||''}
+                      onChange={e => setItemGrade(`${e.target.value} ${itemGrade.split(' ')[1]||''}`.trim())}>
+                      <option value="">Select</option>
+                      {GRADERS.map(g => <option key={g}>{g}</option>)}
+                    </select>
+                  </div>
+                  <div className="field" style={{ margin:0 }}>
+                    <label>Grade</label>
+                    <select value={itemGrade.split(' ')[1]||''}
+                      onChange={e => setItemGrade(`${itemGrade.split(' ')[0]||''} ${e.target.value}`.trim())}>
+                      <option value="">Select</option>
+                      {GRADES.map(g => <option key={g}>{g}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
+              {itemType === 'single' && txType !== 'trade_out' && (
+                <div className="field" style={{ marginTop:10,marginBottom:0 }}>
+                  <label>Condition</label>
+                  <select value={itemCond} onChange={e => setItemCond(e.target.value)}>
+                    {CONDITIONS.map(c => <option key={c}>{c}</option>)}
+                  </select>
+                </div>
+              )}
+              {isOnline && (
+                <button className="btn btn-secondary btn-full" onClick={lookupEbay} disabled={loading||!itemName}
+                  style={{ marginTop:12,fontSize:'.85rem',minHeight:42 }}>
+                  {loading ? '🔍 Searching eBay AU...' : '🔍 Look up eBay AU price'}
+                </button>
+              )}
+            </>
           )}
         </div>
 
@@ -408,7 +562,6 @@ export default function NewTransaction() {
               placeholder="Enter or auto-fill from eBay"
               style={{ fontSize:'1.2rem',fontWeight:700,textAlign:'center' }} />
           </div>
-
           {showWheels && (
             txType === 'buy' && !showOfferCalc ? (
               <button className="btn btn-secondary btn-full" onClick={() => setShowOfferCalc(true)}
@@ -448,10 +601,9 @@ export default function NewTransaction() {
           )}
         </div>
 
-        {/* ── Payment ── */}
+        {/* ── Payment amounts ── */}
         <div className="card" style={{ marginBottom:14 }}>
           <p className="section-label" style={{ marginBottom:12 }}>Payment</p>
-
           {txType === 'buy' && <>
             <div className="field" style={{ marginBottom:0 }}>
               <label>Offer / Cost (A$)</label>
@@ -466,7 +618,6 @@ export default function NewTransaction() {
                 style={{ fontSize:'1.1rem',textAlign:'center' }} />
             </div>
           </>}
-
           {txType === 'sale' && <>
             <div className="field" style={{ marginBottom:0 }}>
               <label>Sale Price (A$)</label>
@@ -481,7 +632,6 @@ export default function NewTransaction() {
                 style={{ fontSize:'1.1rem',textAlign:'center' }} />
             </div>
           </>}
-
           {txType === 'trade_in' && <>
             <div className="field" style={{ marginBottom:0 }}>
               <label>Market Value of Your Card (A$)</label>
@@ -502,7 +652,6 @@ export default function NewTransaction() {
                 style={{ fontSize:'1.1rem',textAlign:'center' }} />
             </div>
           </>}
-
           {txType === 'trade_even' && <>
             <div className="field" style={{ marginBottom:0 }}>
               <label>Market Value of Your Card (A$)</label>
@@ -517,7 +666,6 @@ export default function NewTransaction() {
                 style={{ fontSize:'1.1rem',textAlign:'center' }} />
             </div>
           </>}
-
           {txType === 'trade_out' && <>
             <div className="field" style={{ marginBottom:0 }}>
               <label>Cash Paid Out (A$)</label>
@@ -590,7 +738,7 @@ export default function NewTransaction() {
         </div>
 
         {/* ── Summary ── */}
-        <div className="card" style={{ marginBottom:16 }}>
+        <div className="card" style={{ marginBottom:14 }}>
           <p className="section-label" style={{ marginBottom:10 }}>Summary</p>
           {summaryRows.map(([label,value,color]) => (
             <div key={label} style={{ display:'flex',justifyContent:'space-between',marginBottom:8 }}>
@@ -600,6 +748,73 @@ export default function NewTransaction() {
           ))}
         </div>
 
+        {/* ── Payment Method ── */}
+        <div className="card" style={{ marginBottom:16 }}>
+          <p className="section-label" style={{ marginBottom:10 }}>Payment Method</p>
+          <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8 }}>
+            {PAY_METHODS.map(m => (
+              <button key={m}
+                className={`btn btn-sm${payMethod===m?' btn-primary':' btn-secondary'}`}
+                onClick={() => setPayMethod(m)}>
+                {m}
+              </button>
+            ))}
+          </div>
+          <button className={`btn btn-sm btn-full${payMethod==='Split'?' btn-primary':' btn-secondary'}`}
+            onClick={() => setPayMethod('Split')}>
+            ⚡ Split Payment
+          </button>
+
+          {payMethod === 'Card (Square)' && squareAmount > 0 && (
+            <button className="btn btn-teal btn-full" onClick={openSquare}
+              style={{ marginTop:10 }}>
+              🔵 Open Square — A${squareAmount.toFixed(2)}
+            </button>
+          )}
+
+          {payMethod === 'Split' && (
+            <div style={{ marginTop:12 }}>
+              {squareAmount > 0 && (
+                <p style={{ color:'var(--grey)',fontSize:'.78rem',marginBottom:8,textAlign:'center' }}>
+                  Total: A${squareAmount.toFixed(2)}
+                </p>
+              )}
+              <p style={{ color:'var(--grey)',fontSize:'.72rem',marginBottom:6,textTransform:'uppercase',letterSpacing:'.05em' }}>Method 1</p>
+              <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8 }}>
+                {PAY_METHODS.map(m => (
+                  <button key={m}
+                    className={`btn btn-sm${splitMethod1===m?' btn-primary':' btn-secondary'}`}
+                    onClick={() => { setSplitMethod1(m); if (m === splitMethod2) setSplitMethod2(PAY_METHODS.find(x => x !== m)); }}>
+                    {m}
+                  </button>
+                ))}
+              </div>
+              <div className="field" style={{ marginBottom:10 }}>
+                <label>Amount via {splitMethod1} (A$)</label>
+                <input type="number" inputMode="decimal" value={splitAmount1}
+                  onChange={e => setSplitAmount1(e.target.value)} placeholder="0.00"
+                  style={{ textAlign:'center' }} />
+              </div>
+              <p style={{ color:'var(--grey)',fontSize:'.72rem',marginBottom:6,textTransform:'uppercase',letterSpacing:'.05em' }}>Method 2</p>
+              <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8 }}>
+                {PAY_METHODS.filter(m => m !== splitMethod1).map(m => (
+                  <button key={m}
+                    className={`btn btn-sm${splitMethod2===m?' btn-primary':' btn-secondary'}`}
+                    onClick={() => setSplitMethod2(m)}>
+                    {m}
+                  </button>
+                ))}
+              </div>
+              {squareAmount > 0 && (
+                <div style={{ textAlign:'center',padding:'8px 12px',background:'rgba(245,166,35,.08)',
+                  borderRadius:'var(--radius-sm)',color:'var(--gold)',fontSize:'.85rem',fontWeight:600 }}>
+                  {splitMethod2}: A${Math.max(0, squareAmount - (parseFloat(splitAmount1)||0)).toFixed(2)}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         <button className="btn btn-primary btn-full" onClick={complete}
           style={{ minHeight:60,fontSize:'1.1rem',marginBottom:10 }}>
           ✅ Complete Transaction
@@ -607,14 +822,37 @@ export default function NewTransaction() {
         <div style={{ height:8 }} />
       </div>
 
-      {/* Swipe-up handle indicator */}
+      {/* Swipe-up handle */}
       <div style={{ position:'fixed',bottom:0,left:0,right:0,height:20,display:'flex',
         justifyContent:'center',alignItems:'center',pointerEvents:'none',zIndex:50 }}>
         <div style={{ width:36,height:4,borderRadius:2,background:'rgba(255,255,255,0.18)' }} />
       </div>
 
-      {/* Peek nav — revealed by swipe up near bottom edge */}
       {navPeek && <BottomNav page={page} setPage={peekSetPage} />}
+
+      {/* Square confirmation overlay */}
+      {squareLaunched && (
+        <div style={{ position:'fixed',inset:0,background:'rgba(0,0,0,.82)',
+          display:'flex',alignItems:'center',justifyContent:'center',
+          padding:24,zIndex:600 }}>
+          <div className="card" style={{ width:'100%',maxWidth:340,textAlign:'center',padding:28 }}>
+            <p style={{ fontSize:'1.1rem',fontWeight:700,marginBottom:8 }}>💳 Square Payment</p>
+            <p style={{ color:'var(--grey)',fontSize:'.9rem',marginBottom:24 }}>
+              Did the A${squareAmount.toFixed(2)} payment go through?
+            </p>
+            <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10 }}>
+              <button className="btn btn-ghost"
+                onClick={() => { setSquareLaunched(false); setPayMethod('Cash'); }}>
+                ✗ No
+              </button>
+              <button className="btn btn-success"
+                onClick={() => { setSquareLaunched(false); complete(); }}>
+                ✓ Yes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
