@@ -23,51 +23,77 @@ export const identifyCard = async (base64Image) => {
   return parseVision(data.responses?.[0] || {});
 };
 
+const NOISE_WORDS = new Set([
+  'BASIC','STAGE 1','STAGE 2','ITEM','SUPPORTER','TOOL','STADIUM','TRAINER','POKEMON','RULE BOX',
+]);
+
 const parseVision = (response) => {
   const text  = response.fullTextAnnotation?.text || '';
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
-  const cardNumMatch = text.match(/\b(\d{2,3})\/(\d{2,3})\b/);
-  const gradeMatch   = text.match(/(PSA|BGS|CGC|TAG)\s+(10|[0-9]\.?[05]?)/i);
-  const hpMatch      = text.match(/(\d{2,3})\s*HP/i);
-  const certMatch    = text.match(/\b(\d{7,10})\b/);
+  if (text.length < 10) {
+    return { itemType: 'single', name: '', cardNumber: '', confidence: 'failed' };
+  }
 
-  const grade    = gradeMatch ? `${gradeMatch[1].toUpperCase()} ${gradeMatch[2]}` : '';
-  const cardNum  = cardNumMatch ? cardNumMatch[0] : '';
-  const hp       = hpMatch ? hpMatch[1] : '';
-  const cert     = certMatch ? certMatch[1] : '';
+  const slabMatch = text.match(/\b(PSA|BGS|CGC|TAG)\b/i);
+  if (slabMatch) return parseSlabVision(text, lines, slabMatch[1].toUpperCase());
+  return parseRawVision(text, lines);
+};
 
-  let itemType = 'single';
-  if (grade)                   itemType = 'slab';
-  else if (!hp && !cardNum)    itemType = 'sealed';
+const parseRawVision = (text, lines) => {
+  const cardNumberMatch = text.match(/\b(\d{1,3})\/(\d{1,3})\b/);
+  const cardNumber      = cardNumberMatch ? cardNumberMatch[0] : '';
+  const name            = extractRawName(lines);
+  const confidence      = name && (cardNumber) ? 'high'
+                        : name                 ? 'medium'
+                        :                        'low';
+  return { itemType: 'single', name, cardNumber, confidence };
+};
 
-  const name    = extractName(lines);
-  const setName = extractSet(lines);
+const extractRawName = (lines) => {
+  const skipNum  = /^\d[\d\s/]*$/;
+  for (const line of lines) {
+    const upper = line.toUpperCase().trim();
+    if (skipNum.test(upper)) continue;
+    if (NOISE_WORDS.has(upper)) continue;
+    if (line.length > 1) return line;
+  }
+  return '';
+};
+
+const parseSlabVision = (text, lines, company) => {
+  const gradeKeywords = /GEM\s*MT|PRISTINE|MINT|NM[- ]?MT|NM|EX|VG[- ]?EX|VG|GOOD|FAIR|POOR/i;
+
+  let grade = '';
+  const gradeLineMatch = text.match(
+    new RegExp(`(GEM\\s*MT|PRISTINE|MINT|NM[- ]?MT|NM|EX|VG[- ]?EX|VG|GOOD|FAIR|POOR)?\\s*(10|[1-9](?:\\.5)?(?:\\/10)?)`, 'i')
+  );
+  if (gradeLineMatch) {
+    const num = gradeLineMatch[2].replace('/10', '');
+    grade = `${company} ${num}`;
+  }
+
+  const certMatch = text.match(/\b(\d{7,10})\b/);
+  const cert      = certMatch ? certMatch[1] : '';
+
+  const yearMatch = text.match(/\b(20\d{2})\b/);
+  const year      = yearMatch ? yearMatch[1] : '';
+
+  const hashMatch    = text.match(/#\s*(\w+)/);
+  const cardNumber   = hashMatch ? hashMatch[1] : '';
+
+  const companyLineIdx = lines.findIndex(l => l.toUpperCase().includes(company));
+  const name    = lines[companyLineIdx + 1] || '';
+  const setName = lines[companyLineIdx + 2] || '';
+
+  const confidence = name && (cardNumber || cert) ? 'high'
+                   : name                         ? 'medium'
+                   :                                'low';
 
   return {
-    raw: text, name, setName, cardNum, grade, hp, cert, itemType,
-    confidence: text.length > 30 ? 'high' : text.length > 10 ? 'medium' : 'low',
+    itemType: 'slab', company, grade, name, setName,
+    cardNumber, certNumber: cert, year, confidence,
   };
-};
-
-const extractName = (lines) => {
-  const noise = /^\d+$|^HP\d|^\d+\/\d+/;
-  for (const line of lines) {
-    if (line.length > 2 && !noise.test(line)) return line;
-  }
-  return lines[0] || '';
-};
-
-const extractSet = (lines) => {
-  const kw = ['Scarlet','Violet','Silver','Tempest','Obsidian','Paradox','Paldea',
-    'Base Set','151','Evolutions','Celebrations','Darkness','Vivid','Battle',
-    'Chilling','Fusion','Lost','Brilliant','Astral','Evolving','Crown',
-    'Temporal','Twilight','Surging','Prismatic','Journey','Destined','Shining',
-    'Stellar','Perfect','Phantom','Phantom Forces','Burning'];
-  for (const line of lines)
-    for (const k of kw)
-      if (line.includes(k)) return line;
-  return '';
 };
 
 // ── eBay AU Search ────────────────────────────────────────────────────
