@@ -21,9 +21,9 @@ export default async function handler(req, res) {
     return res.status(413).json({ error: 'Image too large — max 4MB' });
   }
 
-  const apiKey = process.env.VISION_API_KEY;
+  const apiKey = process.env.APP_VISION;
   if (!apiKey) {
-    console.error('[vision] VISION_API_KEY env var is not set');
+    console.error('[vision] APP_VISION env var is not set');
     return res.status(500).json({ error: 'Vision API not configured' });
   }
   console.log('[vision] image length:', image.length, 'apiKey present:', !!apiKey);

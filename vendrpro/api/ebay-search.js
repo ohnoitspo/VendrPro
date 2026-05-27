@@ -37,7 +37,7 @@ export default async function handler(req, res) {
   const safeQuery = query.trim().substring(0, 100);
 
   const appId  = process.env.EBAY_APP_ID;
-  const certId = process.env.EBAY_CERT_ID;
+  const certId = process.env.EBAY_CERT;
   if (!appId || !certId) return res.status(500).json({ error: 'eBay not configured' });
 
   try {
