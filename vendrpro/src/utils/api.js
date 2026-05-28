@@ -23,12 +23,11 @@ export const identifyCard = async (base64Image) => {
   return parseVision(data.responses?.[0] || {});
 };
 
-const NOISE_WORDS = new Set([
-  'BASIC','STAGE 1','STAGE 2','ITEM','SUPPORTER','TOOL','STADIUM','TRAINER','POKEMON','RULE BOX',
-]);
+const TYPE_PATTERN = /\b(BASIC|STAGE\s+[12]|ITEM|SUPPORTER|TOOL|STADIUM|TRAINER|POKEMON|RULE\s+BOX)\s+/i;
 
 const parseVision = (response) => {
   const text  = response.fullTextAnnotation?.text || '';
+  console.log('Vision raw text:', text);
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
   if (text.length < 10) {
@@ -43,57 +42,70 @@ const parseVision = (response) => {
 const parseRawVision = (text, lines) => {
   const cardNumberMatch = text.match(/\b(\d{1,3})\/(\d{1,3})\b/);
   const cardNumber      = cardNumberMatch ? cardNumberMatch[0] : '';
-  const name            = extractRawName(lines);
-  const confidence      = name && (cardNumber) ? 'high'
-                        : name                 ? 'medium'
-                        :                        'low';
+
+  let name = '';
+  const typeMatch = text.match(TYPE_PATTERN);
+  if (typeMatch) {
+    const afterType = text.slice(typeMatch.index + typeMatch[0].length);
+    const hpIdx     = afterType.search(/\s+HP\d+/i);
+    const raw       = hpIdx > 0 ? afterType.slice(0, hpIdx) : afterType.split('\n')[0];
+    name = raw.replace(/\s*\n\s*/g, ' ').trim();
+  } else {
+    name = extractRawName(lines);
+  }
+
+  const confidence = name && cardNumber ? 'high'
+                   : name               ? 'medium'
+                   :                      'low';
   return { itemType: 'single', name, cardNumber, confidence };
 };
 
 const extractRawName = (lines) => {
-  const skipNum  = /^\d[\d\s/]*$/;
+  const skipNum = /^\d[\d\s/]*$/;
   for (const line of lines) {
     const upper = line.toUpperCase().trim();
     if (skipNum.test(upper)) continue;
-    if (NOISE_WORDS.has(upper)) continue;
+    if (/^(BASIC|STAGE [12]|ITEM|SUPPORTER|TOOL|STADIUM|TRAINER|POKEMON|RULE BOX)$/.test(upper)) continue;
     if (line.length > 1) return line;
   }
   return '';
 };
 
-const parseSlabVision = (text, lines, company) => {
-  const gradeKeywords = /GEM\s*MT|PRISTINE|MINT|NM[- ]?MT|NM|EX|VG[- ]?EX|VG|GOOD|FAIR|POOR/i;
+const GRADE_DESCS = 'GEM\\s*MT|PRISTINE|MINT|NM-MT|NM|EX|VG-EX|VG|GOOD|FAIR|POOR';
+const GRADE_RE    = new RegExp(`(?:${GRADE_DESCS})?\\s*(10|[1-9](?:\\.5)?)\\s+(?=\\d{7,10})`, 'i');
 
-  let grade = '';
-  const gradeLineMatch = text.match(
-    new RegExp(`(GEM\\s*MT|PRISTINE|MINT|NM[- ]?MT|NM|EX|VG[- ]?EX|VG|GOOD|FAIR|POOR)?\\s*(10|[1-9](?:\\.5)?(?:\\/10)?)`, 'i')
-  );
-  if (gradeLineMatch) {
-    const num = gradeLineMatch[2].replace('/10', '');
-    grade = `${company} ${num}`;
+const parseSlabVision = (text, lines, company) => {
+  const year        = (text.match(/\b(20\d{2})\b/) || [])[1] || '';
+  const cardNumber  = (text.match(/#\s*(\w+)/) || [])[1] || '';
+
+  // Cert = last 7-10 digit number in text
+  const certMatches = [...text.matchAll(/\b(\d{7,10})\b/g)];
+  const certNumber  = certMatches.length ? certMatches[certMatches.length - 1][1] : '';
+
+  // Grade number appears just before the cert number
+  const gradeMatch  = text.match(GRADE_RE);
+  const grade       = gradeMatch ? `${company} ${gradeMatch[1]}` : '';
+  const gradeDescMatch = text.match(new RegExp(GRADE_DESCS, 'i'));
+  const gradeDescStr   = gradeDescMatch ? gradeDescMatch[0] : '';
+
+  // Middle section: after #NUM, before grade descriptor (or grade number)
+  let name = '', setName = '';
+  const hashMatch = text.match(/#\s*\w+\s*/);
+  if (hashMatch) {
+    const afterHash = text.slice(hashMatch.index + hashMatch[0].length).trim();
+    const boundary  = gradeDescStr
+      ? afterHash.search(new RegExp(gradeDescStr.replace(/\s+/g, '\\s*'), 'i'))
+      : (gradeMatch ? afterHash.search(GRADE_RE) : -1);
+    const middle     = (boundary > 0 ? afterHash.slice(0, boundary) : afterHash).trim();
+    const midLines   = middle.split('\n').map(l => l.trim()).filter(Boolean);
+    name    = midLines[0] || '';
+    setName = midLines[1] || '';
   }
 
-  const certMatch = text.match(/\b(\d{7,10})\b/);
-  const cert      = certMatch ? certMatch[1] : '';
-
-  const yearMatch = text.match(/\b(20\d{2})\b/);
-  const year      = yearMatch ? yearMatch[1] : '';
-
-  const hashMatch    = text.match(/#\s*(\w+)/);
-  const cardNumber   = hashMatch ? hashMatch[1] : '';
-
-  const companyLineIdx = lines.findIndex(l => l.toUpperCase().includes(company));
-  const name    = lines[companyLineIdx + 1] || '';
-  const setName = lines[companyLineIdx + 2] || '';
-
-  const confidence = name && (cardNumber || cert) ? 'high'
-                   : name                         ? 'medium'
-                   :                                'low';
-
-  return {
-    itemType: 'slab', company, grade, name, setName,
-    cardNumber, certNumber: cert, year, confidence,
-  };
+  const confidence = name && (cardNumber || certNumber) ? 'high'
+                   : name                               ? 'medium'
+                   :                                      'low';
+  return { itemType: 'slab', company, grade, name, setName, cardNumber, certNumber, year, confidence };
 };
 
 // ── eBay AU Search ────────────────────────────────────────────────────
