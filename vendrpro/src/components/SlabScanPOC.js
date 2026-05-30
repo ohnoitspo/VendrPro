@@ -1,16 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createWorker } from 'tesseract.js';
 
-// PSA slab physical ratio: 73mm wide × 130mm tall
 const SLAB_RATIO = 73 / 130;
-// PSA label occupies roughly the top 22% of the slab face
 const LABEL_FRAC = 0.22;
-// Contrast multiplier before thresholding — helps separate red sheen from white text
-const CONTRAST = 1.6;
-// White padding added around binary image so Tesseract doesn't clip edge glyphs
-const PAD_PX = 30;
+const CONTRAST   = 1.6;
+const PAD_PX     = 30;
 
-// ── Otsu's method: optimal threshold from greyscale histogram ──────────────
+// ── Otsu optimal threshold from greyscale histogram ────────────────────────
 function otsu(histogram, total) {
   let sum = 0;
   for (let i = 0; i < 256; i++) sum += i * histogram[i];
@@ -29,12 +25,10 @@ function otsu(histogram, total) {
   return thr;
 }
 
-// ── Full preprocessing pipeline ────────────────────────────────────────────
-// Returns { canvas, threshold, inverted } where canvas is the padded binary image.
+// ── Preprocessing pipeline (unchanged from v2) ─────────────────────────────
 function preprocessLabel(src) {
   const sw = src.width, sh = src.height;
 
-  // ── Step 1: read source pixels ─────────────────────────────────────────
   const tmp = document.createElement('canvas');
   tmp.width = sw; tmp.height = sh;
   const tmpCtx = tmp.getContext('2d');
@@ -42,7 +36,6 @@ function preprocessLabel(src) {
   const srcImgData = tmpCtx.getImageData(0, 0, sw, sh);
   const sd = srcImgData.data;
 
-  // ── Step 2: greyscale (luminance) + contrast boost → histogram ─────────
   const grey = new Uint8Array(sw * sh);
   const hist = new Uint32Array(256);
   for (let i = 0; i < sw * sh; i++) {
@@ -53,10 +46,8 @@ function preprocessLabel(src) {
     hist[con]++;
   }
 
-  // ── Step 3: Otsu threshold ──────────────────────────────────────────────
   const thr = otsu(hist, sw * sh);
 
-  // ── Step 4: write greyscale into canvas for 3× upscale ─────────────────
   for (let i = 0; i < sw * sh; i++) {
     const k = i << 2;
     sd[k] = sd[k + 1] = sd[k + 2] = grey[i];
@@ -64,7 +55,6 @@ function preprocessLabel(src) {
   }
   tmpCtx.putImageData(srcImgData, 0, 0);
 
-  // ── Step 5: 3× upscale with bicubic-like smoothing ─────────────────────
   const dw = sw * 3, dh = sh * 3;
   const big = document.createElement('canvas');
   big.width = dw; big.height = dh;
@@ -73,7 +63,6 @@ function preprocessLabel(src) {
   bigCtx.imageSmoothingQuality = 'high';
   bigCtx.drawImage(tmp, 0, 0, dw, dh);
 
-  // ── Step 6: binary threshold on upscaled image ─────────────────────────
   const upd = bigCtx.getImageData(0, 0, dw, dh);
   const px  = upd.data;
   let darkCount = 0;
@@ -86,11 +75,6 @@ function preprocessLabel(src) {
   }
   bigCtx.putImageData(upd, 0, 0);
 
-  // ── Step 7: auto-invert to normalise to black-text-on-white ────────────
-  // PSA labels have white text on red background. After Otsu the red
-  // background (mid-grey) falls below the threshold → becomes black, giving
-  // white-on-black. Invert when most pixels are dark so Tesseract gets the
-  // canonical black-on-white polarity it expects.
   const inverted = darkCount / (dw * dh) > 0.5;
   if (inverted) {
     for (let i = 0; i < dw * dh; i++) {
@@ -100,7 +84,6 @@ function preprocessLabel(src) {
     bigCtx.putImageData(upd, 0, 0);
   }
 
-  // ── Step 8: pad with white border so Tesseract doesn't clip edges ───────
   const out = document.createElement('canvas');
   out.width  = dw + PAD_PX * 2;
   out.height = dh + PAD_PX * 2;
@@ -112,42 +95,100 @@ function preprocessLabel(src) {
   return { canvas: out, threshold: thr, inverted };
 }
 
-// ── Parse raw Tesseract output into PSA fields ─────────────────────────────
-function parsePSAText(raw) {
-  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+// ── Detect grading company from raw OCR text ───────────────────────────────
+// Returns the company string or null if undetected.
+function detectCompany(rawText) {
+  if (/\bPSA\b/.test(rawText)) return 'PSA';
+  if (/\bBGS\b/.test(rawText)) return 'BGS';
+  if (/\bCGC\b/.test(rawText)) return 'CGC';
+  if (/\bTAG\b/.test(rawText)) return 'TAG';
+  return null;
+}
 
-  // Year: first 20XX token
-  const yearM      = raw.match(/\b(20\d{2})\b/);
-  const year       = yearM ? yearM[1] : '';
+// ── Split Tesseract word bboxes into left and right columns ────────────────
+// Uses the image midpoint as the split axis.
+// Words are sorted by y then x within each column and grouped into lines
+// by comparing consecutive y0 values against 1.3× the average word height.
+// Words below the confidence threshold (30%) are discarded as OCR noise.
+function wordsToColumns(words, imageWidth) {
+  const valid = (words || []).filter(w => w.text.trim() && w.confidence > 30);
+  if (!valid.length) return { leftLines: [], rightLines: [] };
 
-  // Card number: alphanumeric token after #
-  const cardNumM   = raw.match(/#\s*([A-Z0-9]+)/i);
-  const cardNumber = cardNumM ? cardNumM[1].toUpperCase() : '';
+  const midX = imageWidth / 2;
+  const avgH = valid.reduce((s, w) => s + (w.bbox.y1 - w.bbox.y0), 0) / valid.length;
+  const lineGap = avgH * 1.3;
 
-  // Grade: descriptor + numeric grade
-  const gradeM = raw.match(
-    /(GEM\s+MT|PRISTINE|MINT|NM[-\s]?MT|NM|NEAR\s+MINT|EX|VG[-\s]?EX)\s+(10|[1-9](?:\.5)?)/i
-  );
-  const grade = gradeM ? gradeM[0].replace(/\s+/g, ' ').trim() : '';
+  const left  = valid.filter(w => (w.bbox.x0 + w.bbox.x1) / 2 < midX);
+  const right = valid.filter(w => (w.bbox.x0 + w.bbox.x1) / 2 >= midX);
 
-  // Cert: last 7–9 digit number that isn't a year
-  const certAll    = [...raw.matchAll(/\b(\d{7,9})\b/g)].filter(m => !/^20\d{2}$/.test(m[1]));
-  const certNumber = certAll.length ? certAll[certAll.length - 1][1] : '';
+  const groupLines = (list) => {
+    if (!list.length) return [];
+    list.sort((a, b) => a.bbox.y0 - b.bbox.y0 || a.bbox.x0 - b.bbox.x0);
+    const lines = []; let cur = [list[0]];
+    for (let i = 1; i < list.length; i++) {
+      if (list[i].bbox.y0 - list[i - 1].bbox.y0 < lineGap) {
+        cur.push(list[i]);
+      } else {
+        lines.push(cur);
+        cur = [list[i]];
+      }
+    }
+    lines.push(cur);
+    return lines
+      .map(l => l.sort((a, b) => a.bbox.x0 - b.bbox.x0).map(w => w.text).join(' ').trim())
+      .filter(Boolean);
+  };
 
-  // Name + setName: lines that appear after the card-number token and
-  // before the grade description, excluding pure-numeric lines.
-  let name = '', setName = '';
-  const hashIdx  = lines.findIndex(l => /#[A-Z0-9]+/i.test(l));
-  const gradeIdx = gradeM
-    ? lines.findIndex(l => new RegExp(gradeM[1].replace(/\s+/g, '\\s*'), 'i').test(l))
-    : lines.length;
-  const midLines = lines
-    .slice(hashIdx >= 0 ? hashIdx + 1 : 0, gradeIdx >= 0 ? gradeIdx : lines.length)
-    .filter(l => !/^\d+$/.test(l) && l.length > 1);
-  name    = (midLines[0] || '').replace(/^FA\//, '').trim();
-  setName =  midLines[1] || '';
+  return { leftLines: groupLines(left), rightLines: groupLines(right) };
+}
 
-  return { year, cardNumber, grade, certNumber, name, setName };
+// ── PSA column parser ──────────────────────────────────────────────────────
+// Left column top→bottom: [year+game+set, cardName, setName]
+// Right column top→bottom: [lang+cardNum, gradeDesc, gradeNum, cert]
+//
+// The ONLY normalisation applied is substituting common OCR confusion in the
+// game-code slot (e.g. P0KEMON → POKEMON). Card name, set name, card number,
+// and cert number are returned verbatim from the OCR output.
+function parsePSA(leftLines, rightLines) {
+  // ── Left column ────────────────────────────────────────────────────────
+  const yearRaw = leftLines[0] || '';
+  // Normalise game code only — unambiguous because this slot always holds it
+  const gameLine = yearRaw.replace(/\bP[O0]K[EÉ]M[O0]N\b/gi, 'POKEMON');
+  const year     = (gameLine.match(/\b(20\d{2})\b/) || [])[1] || '';
+
+  // Card name: second left-column line — returned raw, no alteration
+  const cardName = leftLines[1] || '';
+  // Set name: third left-column line — returned raw
+  const setName  = leftLines[2] || '';
+
+  // ── Right column ───────────────────────────────────────────────────────
+  let language = '', cardNumber = '';
+  for (const line of rightLines) {
+    if (!language) {
+      const lm = line.match(/\b(JP|EN|KR|TW|CN|DE|FR|IT|ES|PT)\b/i);
+      if (lm) language = lm[1].toUpperCase();
+    }
+    if (!cardNumber) {
+      const cm = line.match(/#([A-Z0-9]+)/i);
+      if (cm) cardNumber = cm[1].toUpperCase(); // raw token after #, not corrected
+    }
+  }
+
+  // Grade descriptor line — located by pattern, returned as raw OCR text
+  const gradeDescLine = rightLines.find(l =>
+    /GEM\s*MT|PRISTINE|MINT|NM[-\s]?MT|NEAR\s*MINT|EX|VG[-\s]?EX/i.test(l)
+  ) || '';
+  // Grade number: first right-column line that is exactly a grade numeral
+  const gradeNumLine = rightLines.find(l => /^(10|[1-9](?:\.5)?)$/.test(l.trim())) || '';
+  const grade = [gradeDescLine.trim(), gradeNumLine.trim()].filter(Boolean).join(' ');
+
+  // Cert number: last right-column line that is 7–9 digits — returned raw
+  const certCandidates = rightLines.filter(l => /^\d{7,9}$/.test(l.trim()));
+  const certNumber = certCandidates.length
+    ? certCandidates[certCandidates.length - 1].trim()
+    : '';
+
+  return { year, gameLine, cardName, setName, language, cardNumber, grade, certNumber };
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -155,8 +196,11 @@ export default function SlabScanPOC({ onClose }) {
   const [mode,         setMode]         = useState('camera');
   const [originalUrl,  setOriginalUrl]  = useState('');
   const [processedUrl, setProcessedUrl] = useState('');
-  const [procMeta,     setProcMeta]     = useState(null); // { threshold, inverted }
+  const [procMeta,     setProcMeta]     = useState(null);
   const [rawText,      setRawText]      = useState('');
+  const [company,      setCompany]      = useState(null);
+  const [leftLines,    setLeftLines]    = useState([]);
+  const [rightLines,   setRightLines]   = useState([]);
   const [parsed,       setParsed]       = useState(null);
   const [certRefined,  setCertRefined]  = useState('');
   const [progress,     setProgress]     = useState('');
@@ -179,7 +223,6 @@ export default function SlabScanPOC({ onClose }) {
     return () => streamRef.current?.getTracks().forEach(t => t.stop());
   }, []);
 
-  // ── Guide sizing: fits screen with padding ────────────────────────────
   const guideSize = () => {
     const maxW = Math.min(window.innerWidth * 0.82, 300);
     const maxH = window.innerHeight * 0.62;
@@ -188,7 +231,6 @@ export default function SlabScanPOC({ onClose }) {
     return { w: Math.round(w), h: Math.round(h) };
   };
 
-  // ── CSS pixel → native video pixel (accounts for object-fit:cover) ────
   const cssToVP = (video, cx, cy) => {
     const vW = video.videoWidth, vH = video.videoHeight;
     const cW = window.innerWidth,  cH = window.innerHeight;
@@ -203,15 +245,14 @@ export default function SlabScanPOC({ onClose }) {
     setMode('processing');
 
     try {
-      // ── 1. Crop to label zone ─────────────────────────────────────────
+      // ── 1. Crop to label zone (same as v2) ───────────────────────────
       setProgress('Cropping label…');
       const { w: gW, h: gH } = guideSize();
       const gX = (window.innerWidth  - gW) / 2;
       const gY = (window.innerHeight - gH) / 2;
-      const labelH_css = gH * LABEL_FRAC;
 
       const tl = cssToVP(video, gX,      gY);
-      const br = cssToVP(video, gX + gW, gY + labelH_css);
+      const br = cssToVP(video, gX + gW, gY + gH * LABEL_FRAC);
       const lW = Math.round(br.x - tl.x);
       const lH = Math.round(br.y - tl.y);
 
@@ -224,26 +265,24 @@ export default function SlabScanPOC({ onClose }) {
       labelCanvas.getContext('2d').drawImage(full, tl.x, tl.y, lW, lH, 0, 0, lW, lH);
       setOriginalUrl(labelCanvas.toDataURL('image/png'));
 
-      // ── 2. Preprocessing pipeline ─────────────────────────────────────
-      setProgress('Preprocessing: greyscale → contrast → upscale → Otsu threshold…');
+      // ── 2. Preprocessing (same as v2) ────────────────────────────────
+      setProgress('Preprocessing: greyscale → contrast → 3× upscale → Otsu…');
       const { canvas: processed, threshold, inverted } = preprocessLabel(labelCanvas);
       setProcessedUrl(processed.toDataURL('image/png'));
       setProcMeta({ threshold, inverted });
-      console.log('[SlabScanPOC v.2] Otsu thr:', threshold, '| auto-inverted:', inverted);
-      console.log('[SlabScanPOC v.2] Processed canvas:', processed.width, '×', processed.height);
+      console.log('[POC v3] Otsu thr:', threshold, '| auto-inverted:', inverted,
+                  '| canvas:', processed.width, '×', processed.height);
 
-      // ── 3. Tesseract — full label, PSM 6 ─────────────────────────────
-      setProgress('Initialising Tesseract engine…');
+      // ── 3. Tesseract OCR — full label, PSM 6 ─────────────────────────
+      setProgress('Initialising Tesseract…');
       const worker = await createWorker('eng', 1, {
         logger: m => {
-          if (m.status && typeof m.progress === 'number' && m.progress > 0) {
+          if (m.status && typeof m.progress === 'number' && m.progress > 0)
             setProgress(`${m.status} ${Math.round(m.progress * 100)}%`);
-          }
         },
       });
-
       await worker.setParameters({
-        tessedit_pageseg_mode: '6',    // uniform text block
+        tessedit_pageseg_mode: '6',
         preserve_interword_spaces: '1',
       });
 
@@ -251,22 +290,40 @@ export default function SlabScanPOC({ onClose }) {
       const { data } = await worker.recognize(processed);
       const raw = data.text;
       setRawText(raw);
-      console.log('[SlabScanPOC v.2] Raw OCR output:\n', raw);
+      console.log('[POC v3] Raw OCR:\n', raw);
+      console.log('[POC v3] Word count:', data.words?.length ?? 0);
 
-      // ── 4. Parse fields from full-label output ────────────────────────
-      const fields = parsePSAText(raw);
-      setParsed(fields);
-      console.log('[SlabScanPOC v.2] Parsed fields:', fields);
+      // ── 4. Company detection ─────────────────────────────────────────
+      const co = detectCompany(raw);
+      setCompany(co);
+      console.log('[POC v3] Detected company:', co);
 
-      // ── 5. Refined cert number: bottom strip, digit-only whitelist ────
-      setProgress('Refining cert number (PSM 7 + digits)…');
+      // ── 5. Positional column split (word bboxes) ─────────────────────
+      setProgress('Splitting columns by word position…');
+      const cols = wordsToColumns(data.words, processed.width);
+      setLeftLines(cols.leftLines);
+      setRightLines(cols.rightLines);
+      console.log('[POC v3] Left col:', cols.leftLines);
+      console.log('[POC v3] Right col:', cols.rightLines);
+
+      // ── 6. PSA field extraction — only when PSA detected ─────────────
+      if (co === 'PSA') {
+        const fields = parsePSA(cols.leftLines, cols.rightLines);
+        setParsed(fields);
+        console.log('[POC v3] Parsed PSA:', fields);
+      } else {
+        setParsed(null);
+      }
+
+      // ── 7. Refined cert: bottom strip, digit whitelist ────────────────
+      setProgress('Refining cert number (PSM 7 + digit whitelist)…');
       await worker.setParameters({
         tessedit_pageseg_mode: '7',
         tessedit_char_whitelist: '0123456789',
         preserve_interword_spaces: '0',
       });
       const certH = Math.round(processed.height * 0.28);
-      const { data: certData } = await worker.recognize(processed, {
+      const { data: cd } = await worker.recognize(processed, {
         rectangle: {
           left:   PAD_PX,
           top:    processed.height - certH,
@@ -274,14 +331,14 @@ export default function SlabScanPOC({ onClose }) {
           height: certH - PAD_PX,
         },
       });
-      const certRef = certData.text.replace(/\D/g, '').trim();
+      const certRef = cd.text.replace(/\D/g, '').trim();
       setCertRefined(certRef);
-      console.log('[SlabScanPOC v.2] Cert refined:', certRef);
+      console.log('[POC v3] Cert refined:', certRef);
 
       await worker.terminate();
       setMode('results');
     } catch (err) {
-      console.error('[SlabScanPOC v.2]', err);
+      console.error('[POC v3]', err);
       setError('Failed: ' + err.message);
       setMode('camera');
     }
@@ -290,11 +347,13 @@ export default function SlabScanPOC({ onClose }) {
   const reset = () => {
     setMode('camera');
     setOriginalUrl(''); setProcessedUrl(''); setProcMeta(null);
-    setRawText(''); setParsed(null); setCertRefined('');
+    setRawText(''); setCompany(null);
+    setLeftLines([]); setRightLines([]);
+    setParsed(null); setCertRefined('');
     setProgress(''); setError('');
   };
 
-  // ── Processing screen ──────────────────────────────────────────────────
+  // ── Processing ─────────────────────────────────────────────────────────
   if (mode === 'processing') return (
     <div style={{ position:'fixed',inset:0,background:'#080D1E',zIndex:999,
       display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:20 }}>
@@ -306,28 +365,35 @@ export default function SlabScanPOC({ onClose }) {
     </div>
   );
 
-  // ── Results screen ─────────────────────────────────────────────────────
+  // ── Results ────────────────────────────────────────────────────────────
   if (mode === 'results') {
-    const FIELDS = [
-      { label:'Year',              value: parsed?.year },
-      { label:'Card Number',       value: parsed?.cardNumber },
-      { label:'Grade',             value: parsed?.grade },
-      { label:'Name',              value: parsed?.name },
-      { label:'Set Name',          value: parsed?.setName },
-      { label:'Cert # (from text)',value: parsed?.certNumber },
-      { label:'Cert # (refined)',  value: certRefined, highlight: true },
-    ];
+    const companyColour = company === 'PSA' ? 'var(--emerald)'
+                        : company           ? 'var(--amber)'
+                        :                     'var(--rose)';
+
+    const PSA_FIELDS = parsed ? [
+      { label: 'Year',             value: parsed.year },
+      { label: 'Game / Set line',  value: parsed.gameLine },
+      { label: 'Card Name',        value: parsed.cardName },
+      { label: 'Set Name',         value: parsed.setName },
+      { label: 'Language',         value: parsed.language },
+      { label: 'Card Number',      value: parsed.cardNumber },
+      { label: 'Grade',            value: parsed.grade },
+      { label: 'Cert # (column)',  value: parsed.certNumber },
+      { label: 'Cert # (refined)', value: certRefined, highlight: true },
+    ] : [];
+
     return (
       <div style={{ position:'fixed',inset:0,background:'var(--navy)',zIndex:999,overflowY:'auto' }}>
 
-        {/* Header */}
+        {/* Sticky header */}
         <div style={{ position:'sticky',top:0,background:'var(--navy)',zIndex:1,
           padding:'12px 16px',borderBottom:'1px solid var(--navy-light)',
           display:'flex',alignItems:'center',justifyContent:'space-between' }}>
           <div>
             <p style={{ color:'var(--teal)',fontSize:'.68rem',fontWeight:700,
-              textTransform:'uppercase',letterSpacing:'.08em' }}>POC v.2</p>
-            <h2 style={{ color:'var(--gold)',fontSize:'1rem',marginTop:1 }}>Slab Scan Results</h2>
+              textTransform:'uppercase',letterSpacing:'.08em' }}>POC Slabscan v3</p>
+            <h2 style={{ color:'var(--gold)',fontSize:'1rem',marginTop:1 }}>Results</h2>
           </div>
           <button onClick={onClose} style={{ background:'none',border:'none',
             color:'var(--grey)',fontSize:'1.3rem',cursor:'pointer',lineHeight:1 }}>✕</button>
@@ -339,20 +405,13 @@ export default function SlabScanPOC({ onClose }) {
           <p style={{ color:'var(--grey)',fontSize:'.68rem',textTransform:'uppercase',
             letterSpacing:'.06em',marginBottom:8 }}>Label Images</p>
           <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:4 }}>
-            <div>
-              <p style={{ color:'var(--grey)',fontSize:'.7rem',marginBottom:4,textAlign:'center' }}>
-                Original crop
-              </p>
-              {originalUrl && <img src={originalUrl} alt="original"
-                style={{ width:'100%',borderRadius:6,border:'1px solid var(--navy-light)',display:'block' }} />}
-            </div>
-            <div>
-              <p style={{ color:'var(--grey)',fontSize:'.7rem',marginBottom:4,textAlign:'center' }}>
-                Preprocessed (B&W)
-              </p>
-              {processedUrl && <img src={processedUrl} alt="processed"
-                style={{ width:'100%',borderRadius:6,border:'1px solid var(--navy-light)',display:'block' }} />}
-            </div>
+            {[['Original crop', originalUrl], ['Preprocessed B&W', processedUrl]].map(([lbl, url]) => (
+              <div key={lbl}>
+                <p style={{ color:'var(--grey)',fontSize:'.7rem',marginBottom:4,textAlign:'center' }}>{lbl}</p>
+                {url && <img src={url} alt={lbl}
+                  style={{ width:'100%',borderRadius:6,border:'1px solid var(--navy-light)',display:'block' }} />}
+              </div>
+            ))}
           </div>
           {procMeta && (
             <p style={{ color:'var(--grey)',fontSize:'.7rem',textAlign:'center',marginBottom:16 }}>
@@ -360,40 +419,85 @@ export default function SlabScanPOC({ onClose }) {
             </p>
           )}
 
-          {/* ── Raw OCR text ── */}
+          {/* ── Company detection ── */}
           <p style={{ color:'var(--grey)',fontSize:'.68rem',textTransform:'uppercase',
-            letterSpacing:'.06em',marginBottom:8 }}>Raw OCR Text (full label, PSM 6)</p>
+            letterSpacing:'.06em',marginBottom:8 }}>Company Detection</p>
           <div style={{ background:'var(--navy-card)',border:'1px solid var(--navy-light)',
-            borderRadius:8,padding:'12px 14px',marginBottom:16,
-            maxHeight:220,overflowY:'auto' }}>
-            <pre style={{ color:'var(--white)',fontFamily:'monospace',fontSize:'.78rem',
-              margin:0,whiteSpace:'pre-wrap',wordBreak:'break-all',lineHeight:1.6 }}>
-              {rawText || '(empty — nothing recognised)'}
-            </pre>
+            borderRadius:8,padding:'10px 14px',marginBottom:16,
+            display:'flex',alignItems:'center',gap:10 }}>
+            <span style={{ fontWeight:700,fontSize:'1rem',color:companyColour }}>
+              {company ?? 'Unknown'}
+            </span>
+            <span style={{ color:'var(--grey)',fontSize:'.82rem' }}>
+              {company === 'PSA'
+                ? '— two-column template applied'
+                : company
+                  ? `— layout template for ${company} not yet implemented in this POC`
+                  : '— could not detect grading company from OCR text'}
+            </span>
           </div>
 
-          {/* ── Parsed fields ── */}
+          {/* ── Column lines (always shown so you can verify the split) ── */}
           <p style={{ color:'var(--grey)',fontSize:'.68rem',textTransform:'uppercase',
-            letterSpacing:'.06em',marginBottom:8 }}>Parsed Fields</p>
-          <div className="card" style={{ padding:0,marginBottom:20 }}>
-            {FIELDS.map(({ label, value, highlight }) => (
-              <div key={label} style={{ display:'flex',justifyContent:'space-between',
-                alignItems:'center',padding:'9px 14px',
-                borderBottom:'1px solid var(--navy-light)' }}>
-                <p style={{ color:'var(--grey)',fontSize:'.82rem',flexShrink:0,marginRight:12 }}>
-                  {label}
-                </p>
-                <p style={{
-                  color: value ? (highlight ? 'var(--teal)' : 'var(--white)') : 'var(--grey)',
-                  fontFamily:'monospace',fontSize:'.82rem',
-                  textAlign:'right',fontStyle: value ? 'normal' : 'italic',
-                  fontWeight: highlight && value ? 700 : 400,
-                }}>
-                  {value || '—'}
-                </p>
+            letterSpacing:'.06em',marginBottom:8 }}>Positional Column Split</p>
+          <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16 }}>
+            {[['Left col', leftLines], ['Right col', rightLines]].map(([colLabel, lines]) => (
+              <div key={colLabel} style={{ background:'var(--navy-card)',
+                border:'1px solid var(--navy-light)',borderRadius:8,padding:'10px 12px' }}>
+                <p style={{ color:'var(--grey)',fontSize:'.68rem',marginBottom:8,
+                  textTransform:'uppercase',letterSpacing:'.05em' }}>{colLabel}</p>
+                {lines.length === 0
+                  ? <p style={{ color:'var(--grey)',fontStyle:'italic',fontSize:'.78rem' }}>(empty)</p>
+                  : lines.map((ln, i) => (
+                    <div key={i} style={{ display:'flex',gap:6,marginBottom:4,alignItems:'flex-start' }}>
+                      <span style={{ color:'var(--grey)',fontSize:'.68rem',
+                        flexShrink:0,marginTop:2,minWidth:14 }}>[{i}]</span>
+                      <span style={{ color:'var(--white)',fontFamily:'monospace',
+                        fontSize:'.78rem',wordBreak:'break-all' }}>{ln}</span>
+                    </div>
+                  ))
+                }
               </div>
             ))}
           </div>
+
+          {/* ── Raw OCR text ── */}
+          <p style={{ color:'var(--grey)',fontSize:'.68rem',textTransform:'uppercase',
+            letterSpacing:'.06em',marginBottom:8 }}>Raw OCR Text (PSM 6, full block)</p>
+          <div style={{ background:'var(--navy-card)',border:'1px solid var(--navy-light)',
+            borderRadius:8,padding:'12px 14px',marginBottom:16,
+            maxHeight:200,overflowY:'auto' }}>
+            <pre style={{ color:'var(--white)',fontFamily:'monospace',fontSize:'.78rem',
+              margin:0,whiteSpace:'pre-wrap',wordBreak:'break-all',lineHeight:1.6 }}>
+              {rawText || '(nothing recognised)'}
+            </pre>
+          </div>
+
+          {/* ── Parsed fields — PSA only ── */}
+          {company === 'PSA' && parsed && (
+            <>
+              <p style={{ color:'var(--grey)',fontSize:'.68rem',textTransform:'uppercase',
+                letterSpacing:'.06em',marginBottom:8 }}>Parsed Fields</p>
+              <div className="card" style={{ padding:0,marginBottom:20 }}>
+                {PSA_FIELDS.map(({ label, value, highlight }) => (
+                  <div key={label} style={{ display:'flex',justifyContent:'space-between',
+                    alignItems:'flex-start',padding:'9px 14px',
+                    borderBottom:'1px solid var(--navy-light)',gap:12 }}>
+                    <p style={{ color:'var(--grey)',fontSize:'.8rem',flexShrink:0 }}>{label}</p>
+                    <p style={{
+                      color: value ? (highlight ? 'var(--teal)' : 'var(--white)') : 'var(--grey)',
+                      fontFamily:'monospace',fontSize:'.8rem',textAlign:'right',
+                      fontStyle: value ? 'normal' : 'italic',
+                      fontWeight: highlight && value ? 700 : 400,
+                      wordBreak:'break-all',
+                    }}>
+                      {value || '—'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
 
           <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10 }}>
             <button className="btn btn-secondary" onClick={reset}>← Scan Another</button>
@@ -405,7 +509,7 @@ export default function SlabScanPOC({ onClose }) {
     );
   }
 
-  // ── Camera view ────────────────────────────────────────────────────────
+  // ── Camera ─────────────────────────────────────────────────────────────
   const { w: guideW, h: guideH } = guideSize();
   const labelZoneH = Math.round(guideH * LABEL_FRAC);
 
@@ -414,63 +518,45 @@ export default function SlabScanPOC({ onClose }) {
       <video ref={videoRef} playsInline muted
         style={{ position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover' }} />
 
-      {/* Dimming overlay with guide */}
       <div style={{ position:'absolute',inset:0,background:'rgba(0,0,0,.55)',
         display:'flex',alignItems:'center',justifyContent:'center' }}>
         <div style={{ position:'relative',width:guideW,height:guideH }}>
-
-          {/* Slab outline */}
           <div style={{ position:'absolute',inset:0,border:'2px solid rgba(255,255,255,.45)',
-            borderRadius:8,pointerEvents:'none' }} />
-
-          {/* Label zone highlight */}
+            borderRadius:8 }} />
           <div style={{ position:'absolute',left:0,right:0,top:0,height:labelZoneH,
-            background:'rgba(210,40,40,.2)',
-            border:'2px solid rgba(220,60,60,.85)',
-            borderRadius:'8px 8px 0 0',
-            display:'flex',alignItems:'center',justifyContent:'center',gap:6 }}>
+            background:'rgba(210,40,40,.2)',border:'2px solid rgba(220,60,60,.85)',
+            borderRadius:'8px 8px 0 0',display:'flex',alignItems:'center',justifyContent:'center' }}>
             <span style={{ color:'#fff',fontSize:'.68rem',fontWeight:700,
-              letterSpacing:'.07em',textTransform:'uppercase',
-              textShadow:'0 1px 4px rgba(0,0,0,.85)' }}>
-              PSA Label ↑
+              letterSpacing:'.07em',textTransform:'uppercase',textShadow:'0 1px 4px rgba(0,0,0,.85)' }}>
+              Label Zone ↑
             </span>
           </div>
-
-          {/* Corner marks */}
           {[
-            { k:'tl', s:{ top:-2,   left:-2,  borderTop:'3px solid #fff', borderLeft:'3px solid #fff',  borderRadius:'4px 0 0 0' }},
-            { k:'tr', s:{ top:-2,   right:-2, borderTop:'3px solid #fff', borderRight:'3px solid #fff', borderRadius:'0 4px 0 0' }},
+            { k:'tl', s:{ top:-2,   left:-2,  borderTop:'3px solid #fff', borderLeft:'3px solid #fff',   borderRadius:'4px 0 0 0' }},
+            { k:'tr', s:{ top:-2,   right:-2, borderTop:'3px solid #fff', borderRight:'3px solid #fff',  borderRadius:'0 4px 0 0' }},
             { k:'bl', s:{ bottom:-2,left:-2,  borderBottom:'3px solid #fff',borderLeft:'3px solid #fff', borderRadius:'0 0 0 4px' }},
             { k:'br', s:{ bottom:-2,right:-2, borderBottom:'3px solid #fff',borderRight:'3px solid #fff',borderRadius:'0 0 4px 0' }},
-          ].map(({ k, s }) => (
-            <div key={k} style={{ position:'absolute',width:20,height:20,...s }} />
-          ))}
+          ].map(({ k, s }) => <div key={k} style={{ position:'absolute',width:20,height:20,...s }} />)}
         </div>
       </div>
 
-      {/* Instruction */}
       <div style={{ position:'absolute',left:0,right:0,
         top:`calc(50% + ${guideH / 2 + 14}px)`,padding:'0 32px',textAlign:'center' }}>
         <p style={{ color:'rgba(255,255,255,.65)',fontSize:'.8rem',lineHeight:1.5 }}>
-          POC v.2 — hold slab label-up, align inside the red zone
+          POC Slabscan v3 — align label inside red zone
         </p>
       </div>
 
-      {/* Controls */}
       <div style={{ position:'absolute',bottom:0,left:0,right:0,
         padding:'20px',paddingBottom:'max(20px,env(safe-area-inset-bottom))',
         display:'flex',flexDirection:'column',alignItems:'center',gap:14 }}>
-        {error && (
-          <p style={{ color:'#FB7185',fontSize:'.82rem',textAlign:'center' }}>{error}</p>
-        )}
+        {error && <p style={{ color:'#FB7185',fontSize:'.82rem',textAlign:'center' }}>{error}</p>}
         <button onClick={capture} aria-label="Capture"
           style={{ width:70,height:70,borderRadius:'50%',background:'#fff',
             border:'4px solid rgba(255,255,255,.3)',cursor:'pointer',flexShrink:0 }} />
         <button onClick={onClose}
           style={{ background:'none',border:'none',color:'rgba(255,255,255,.5)',
-            fontSize:'.85rem',cursor:'pointer' }}>
-          Cancel
-        </button>
+            fontSize:'.85rem',cursor:'pointer' }}>Cancel</button>
       </div>
     </div>
   );
