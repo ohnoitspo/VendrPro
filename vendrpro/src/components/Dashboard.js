@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { Ctx } from '../App';
 import { getCurrentFloat, getTransactions, getInventory, getSession } from '../utils/storage';
+import SlabScanPOC from './SlabScanPOC';
 
 export default function Dashboard() {
   const { setPage, isOnline } = useContext(Ctx);
-  const [stats, setStats] = useState({ float:0, txCount:0, acquired:0, profit:0, revenue:0 });
+  const [stats, setStats]       = useState({ float:0, txCount:0, acquired:0, profit:0, revenue:0 });
+  const [showSlabPOC, setShowSlabPOC] = useState(false);
 
   useEffect(() => {
     const refresh = () => {
@@ -74,13 +76,18 @@ export default function Dashboard() {
 
         {/* Quick actions */}
         <p className="section-label">Quick Actions</p>
-        <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:20 }}>
+        <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10 }}>
           <button className="btn btn-secondary" onClick={() => setPage('inventory')}>📦 Inventory</button>
           <button className="btn btn-secondary" onClick={() => setPage('eod')}>📊 End of Day</button>
         </div>
+        <button className="btn btn-ghost btn-full btn-sm" onClick={() => setShowSlabPOC(true)}
+          style={{ marginBottom:20,fontSize:'.78rem',color:'var(--teal)',borderColor:'var(--teal)' }}>
+          🧪 POC: Slab Scan
+        </button>
 
         {/* Recent transactions */}
         <RecentTxns />
+        {showSlabPOC && <SlabScanPOC onClose={() => setShowSlabPOC(false)} />}
       </div>
     </div>
   );
